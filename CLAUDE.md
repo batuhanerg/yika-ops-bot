@@ -80,10 +80,11 @@ yika-ops-bot/
 │   ├── test_validators.py       # Field validation
 │   ├── test_sheets.py           # Sheets read/write
 │   ├── test_site_resolver.py    # Site name resolution
-│   └── test_formatters.py       # Slack message formatting
+│   ├── test_formatters.py       # Slack message formatting
+│   └── test_chain.py            # Chain wizard + normalization
 │
-└── deploy/
-    └── cloudbuild.yaml          # (future) GCP Cloud Build config
+├── Dockerfile                   # Cloud Run deployment
+└── .dockerignore
 ```
 
 ---
@@ -219,49 +220,27 @@ GOOGLE_SERVICE_ACCOUNT_JSON=...
 
 ---
 
-## SESSION 3: Deploy + End-to-End Testing
+## SESSION 3: Deploy + End-to-End Testing ✅
 
-**Goal:** Deploy to Cloud Run, update Slack webhooks, run full end-to-end tests with real messages. Fix any issues found.
+**Status:** Complete — deployed to Cloud Run, 103 tests passing.
 
-**Pre-session setup the developer must do manually:**
-1. Ensure `gcloud` CLI is installed and authenticated
-2. Have the GCP project ready with billing enabled
+**What was built:**
+- Dockerfile + `.dockerignore` for Cloud Run deployment
+- Create-site wizard with chained operations (create_site → update_hardware → update_implementation → log_support)
+  - Roadmap message, step indicators, final summary
+- Multi-tab extraction: Claude extracts site + hardware + implementation + support from a single message
+- Last Verified date auto-injection for hardware/implementation
+- Duplicate site_id prevention
+- Event deduplication (Slack retry protection)
+- List value serialization fix for Sheets API
 
-**Deliverables:**
-- Dockerfile (Python 3.12 slim)
-- Cloud Run deployment working
-- Slack Event Subscription URL updated to Cloud Run URL
-- All operations tested end-to-end with real Slack messages
-- README.md complete with setup guide
-- CHANGELOG.md up to date
-- Share sheet with team as Viewer
-- Send `/mustafa yardım` in #technical-operations to onboard team
+**Deployment:** Cloud Run `europe-west1`, service `mustafa-bot`, revision `mustafa-bot-00010-qzv`
 
-**Tests:**
-No new automated tests. This session is manual end-to-end testing:
+**Known issues to address:**
+- Mid-chain text replies can overwrite chain state (need thread lock during active chain)
+- Technician resolves to Slack display name, not short team name
 
-Run through each scenario in real Slack:
-1. `@mustafa merhaba` → bot responds
-2. `@mustafa yardım` → Turkish help guide appears
-3. Log support (Turkish, full info) → confirmation → write → read-back
-4. Log support (missing fields) → bot asks → provide → confirmation → write
-5. Query site summary → formatted response
-6. Create new site → wizard flow
-7. Update hardware → before/after shown
-8. Stock inquiry triggered after device replacement
-9. English message → works
-10. Unknown site name → bot asks to clarify
-11. Future date → rejected
-12. Verify Audit Log tab has entries
-
-**Implementation:**
-1. `Dockerfile`
-2. Deploy script / instructions
-3. Update Slack webhook URLs
-4. Fix any issues from manual testing
-5. Finalize README.md and CHANGELOG.md
-
-**Commit message:** `feat: cloud run deployment and end-to-end verification`
+**22 new tests** in `tests/test_chain.py` (normalization, roadmap, step indicators, final summary, list serialization)
 
 ---
 

@@ -4,7 +4,8 @@ A Slack bot for ERG Controls that manages IoT customer support operations throug
 
 ## Status
 
-**Session 2: Sheets + Slack Integration** — Complete (81 tests passing)
+**Session 3: Cloud Run Deploy + E2E Testing** — Complete (103 tests passing)
+Deployed to Cloud Run (`europe-west1`), live in `#technical-operations`.
 
 ## Quick Start
 
@@ -58,6 +59,15 @@ ngrok http 8080
 - `/mustafa yardım` slash command
 - Audit Log writes on every operation
 
+### Session 3: Cloud Run Deploy + E2E Testing
+- Dockerized and deployed to Google Cloud Run (`europe-west1`)
+- **Create-site wizard** — chained multi-step flow: create_site → update_hardware → update_implementation → log_support
+  - Roadmap message, step indicators (Adım 1/4), final summary with ✅/⏭️ per step
+- Multi-tab extraction: single message → site + hardware + implementation + support data
+- Last Verified date auto-injected for hardware/implementation writes
+- Duplicate site_id prevention
+- Event deduplication against Slack retries
+
 ## Project Structure
 
 ```
@@ -73,7 +83,7 @@ app/
 │   ├── common.py           — Shared message processing pipeline
 │   ├── mentions.py         — @mustafa mention handler
 │   ├── messages.py         — DM message handler
-│   ├── actions.py          — Confirm/cancel button handlers
+│   ├── actions.py          — Confirm/cancel button handlers + chain logic
 │   └── threads.py          — Thread state management
 ├── prompts/
 │   ├── system_prompt.md    — Main Claude system prompt
@@ -88,14 +98,24 @@ tests/
 ├── test_validators.py      — Field validation (31 tests)
 ├── test_site_resolver.py   — Site resolution (11 tests)
 ├── test_formatters.py      — Message formatting (6 tests)
-├── test_sheets.py          — Sheets operations (14 tests, mocked)
-└── test_threads.py         — Thread state (7 tests)
+├── test_sheets.py          — Sheets operations (16 tests, mocked)
+├── test_threads.py         — Thread state (7 tests)
+└── test_chain.py           — Chain wizard + normalization (20 tests)
 ```
+
+### Deploy to Cloud Run
+
+```bash
+gcloud run deploy mustafa-bot \
+  --source . \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --memory 512Mi \
+  --timeout 60
+```
+
+Then update the Slack Event Subscription URL to the Cloud Run service URL + `/slack/events`.
 
 ## Architecture
 
 See [yika-ops-bot-spec.md](yika-ops-bot-spec.md) for the full specification.
-
-## Next: Session 3
-
-Deploy to Cloud Run + end-to-end testing. See [CLAUDE.md](CLAUDE.md) for the roadmap.

@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+.env
+.venv
+venv
+.git
+.claude
+tests
+*.md
+!requirements.txt

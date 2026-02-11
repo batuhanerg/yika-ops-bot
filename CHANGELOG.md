@@ -1,5 +1,44 @@
 # Changelog
 
+## Session 3 — Cloud Run Deploy + End-to-End Testing (2026-02-10/11)
+
+### Added
+- **Dockerfile** and `.dockerignore` for Cloud Run deployment
+- **Create-site wizard** with chained operations: create_site → update_hardware → update_implementation → log_support
+  - Roadmap message posted before first confirmation card
+  - Step indicator on each card header ("Adım 1/4 — Yeni Site")
+  - Final summary showing written vs skipped steps (`site ✅, donanım ✅, ayarlar ⏭️, destek kaydı ✅`)
+  - Each step can be confirmed or skipped independently
+- **Multi-tab extraction** in Claude prompt: single message can contain site + hardware + implementation + support data, returned as `extra_operations`
+- **Last Verified date** injected automatically (defaults to today) for hardware and implementation writes; user can override via natural language
+- **Duplicate site_id check** before create_site — warns if site already exists
+- **Event deduplication** to prevent double-processing from Slack retries (thread-safe TTL cache on `event_ts`)
+- **`extra_operations`** field on `ParseResult` model for chained operation support
+- `build_chain_roadmap()` and `build_chain_final_summary()` formatters
+- `CHAIN_LABELS` dict for short Turkish operation labels
+- `step_info` parameter on `format_confirmation_message` for step indicators
+- 22 new tests (20 chain + 2 sheets) — **103 total, all passing**
+
+### Fixed
+- **Support log write error** (`gspread APIError: Invalid values — list_value`): `devices_affected` was passed as a Python list; now serialized to comma-separated string
+- **Duplicate message processing**: roadmap and first card appeared twice due to Slack `app_mention` event retries when handler takes >3s (Claude API call)
+
+### Changed
+- `app/handlers/actions.py`: overhauled confirm/cancel handlers for chain tracking (pending_operations, completed_operations, skipped_operations, chain_steps)
+- `app/handlers/common.py`: added `_normalize_create_site_data()` for contacts flattening, country code expansion, and extra_operations extraction
+- `app/services/claude.py`: parses `extra_operations` from Claude JSON response
+- `app/services/sheets.py`: list serialization in `append_support_log`, new methods for stock/hardware reads
+- `app/prompts/system_prompt.md`: added multi-tab extraction rules and last_verified extraction instruction
+
+### Deployed
+- Cloud Run: `europe-west1`, project `yika-ops-bot`
+- Current revision: `mustafa-bot-00010-qzv`
+- Slack Event Subscription URL pointed to Cloud Run service URL
+
+### Known Issues
+- Mid-chain text replies can overwrite chain state (thread lock not yet implemented)
+- Technician name uses Slack display name, not short team name (acceptable for now)
+
 ## Session 2 — Sheets + Slack Integration (2026-02-10/11)
 
 ### Added

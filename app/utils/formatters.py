@@ -7,6 +7,7 @@ from typing import Any
 # --- Field display labels ---
 
 FIELD_LABELS: dict[str, str] = {
+    "ticket_id": "Ticket ID",
     "site_id": "Site ID",
     "received_date": "Received Date",
     "resolved_date": "Resolved Date",
@@ -32,6 +33,14 @@ FIELD_LABELS: dict[str, str] = {
     "location": "Location",
     "condition": "Condition",
     "query_type": "Query Type",
+    "supervisor_1": "Supervisor 1",
+    "phone_1": "Phone 1",
+    "email_1": "Email 1",
+    "supervisor_2": "Supervisor 2",
+    "phone_2": "Phone 2",
+    "email_2": "Email 2",
+    "dashboard_link": "Dashboard Link",
+    "address": "Address",
 }
 
 OPERATION_TITLES: dict[str, str] = {
@@ -44,21 +53,34 @@ OPERATION_TITLES: dict[str, str] = {
     "update_stock": "Stok Güncelleme / Stock Update",
 }
 
+CHAIN_LABELS: dict[str, str] = {
+    "create_site": "site",
+    "update_hardware": "donanım",
+    "update_implementation": "ayarlar",
+    "log_support": "destek kaydı",
+    "update_stock": "stok",
+}
+
 # Fields to skip in confirmation display
-_SKIP_FIELDS = {"operation", "entries", "_future_date_warning"}
+_SKIP_FIELDS = {"operation", "entries", "_future_date_warning", "_row_index"}
 
 
-def format_confirmation_message(data: dict[str, Any]) -> list[dict]:
+def format_confirmation_message(data: dict[str, Any], step_info: tuple[int, int] | None = None) -> list[dict]:
     """Format a confirmation message with all fields and confirm/cancel buttons."""
     operation = data.get("operation", "unknown")
     title = OPERATION_TITLES.get(operation, operation)
 
     blocks: list[dict] = []
 
-    # Header
+    # Header (with step indicator if in chain)
+    if step_info:
+        current, total = step_info
+        header_text = f"📋 Adım {current}/{total} — {title}"
+    else:
+        header_text = f"📋 {title}"
     blocks.append({
         "type": "header",
-        "text": {"type": "plain_text", "text": f"📋 {title}"},
+        "text": {"type": "plain_text", "text": header_text},
     })
 
     # Fields section
@@ -73,6 +95,10 @@ def format_confirmation_message(data: dict[str, Any]) -> list[dict]:
     if "entries" in data and data["entries"]:
         for i, entry in enumerate(data["entries"], 1):
             parts = [f"{entry.get('device_type', '?')} x{entry.get('qty', '?')}"]
+            if entry.get("hw_version"):
+                parts.append(f"HW:{entry['hw_version']}")
+            if entry.get("fw_version"):
+                parts.append(f"FW:{entry['fw_version']}")
             if entry.get("notes"):
                 parts.append(f"({entry['notes']})")
             fields.append({"type": "mrkdwn", "text": f"*Item {i}:*\n{' '.join(parts)}"})
@@ -272,3 +298,32 @@ def format_help_text() -> list[dict]:
     })
 
     return blocks
+
+
+def build_chain_roadmap(chain_steps: list[str]) -> str:
+    """Build a roadmap message for a chained create_site wizard."""
+    _EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"]
+    lines = ["Müşteri kaydı oluşturuyorum. Sırayla:"]
+    for i, op in enumerate(chain_steps):
+        emoji = _EMOJIS[i] if i < len(_EMOJIS) else f"{i + 1}."
+        label = CHAIN_LABELS.get(op, op).capitalize()
+        lines.append(f"{emoji} {label}")
+    lines.append("Her adımda onaylayabilir veya atlayabilirsiniz.")
+    return "\n".join(lines)
+
+
+def build_chain_final_summary(
+    site_id: str, chain_steps: list[str], completed_ops: set[str], skipped_ops: set[str],
+) -> str:
+    """Build the final one-line summary for a completed chain."""
+    parts = []
+    for op in chain_steps:
+        label = CHAIN_LABELS.get(op, op)
+        if op in completed_ops:
+            parts.append(f"{label} ✅")
+        elif op in skipped_ops:
+            parts.append(f"{label} ⏭️")
+        else:
+            parts.append(f"{label} ❌")
+    prefix = f"`{site_id}` tamamlandı" if site_id else "Tamamlandı"
+    return f"{prefix}: {', '.join(parts)}"

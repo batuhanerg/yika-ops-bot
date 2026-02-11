@@ -82,13 +82,13 @@ def mock_gspread():
     support_ws = MagicMock()
     support_ws.title = "Support Log"
     support_ws.get_all_records.return_value = [
-        {"Site ID": "MIG-TR-01", "Received Date": "2025-01-10", "Resolved Date": "2025-01-10", "Type": "Visit", "Status": "Resolved", "Root Cause": "FW Bug", "Reported By": "Ahmet", "Issue Summary": "3 tags not syncing", "Resolution": "Replaced batteries", "Devices Affected": "Tags", "Technician": "Batu", "Notes": ""},
-        {"Site ID": "MCD-EG-01", "Received Date": "2025-01-18", "Resolved Date": "", "Type": "Visit", "Status": "Follow-up (ERG)", "Root Cause": "HW Fault (Customer)", "Reported By": "Omar", "Issue Summary": "2 anchors intermittent", "Resolution": "", "Devices Affected": "Anchors", "Technician": "Gökhan", "Notes": ""},
+        {"Ticket ID": "SUP-001", "Site ID": "MIG-TR-01", "Received Date": "2025-01-10", "Resolved Date": "2025-01-10", "Type": "Visit", "Status": "Resolved", "Root Cause": "FW Bug", "Reported By": "Ahmet", "Issue Summary": "3 tags not syncing", "Resolution": "Replaced batteries", "Devices Affected": "Tags", "Technician": "Batu", "Notes": ""},
+        {"Ticket ID": "SUP-002", "Site ID": "MCD-EG-01", "Received Date": "2025-01-18", "Resolved Date": "", "Type": "Visit", "Status": "Follow-up (ERG)", "Root Cause": "HW Fault (Customer)", "Reported By": "Omar", "Issue Summary": "2 anchors intermittent", "Resolution": "", "Devices Affected": "Anchors", "Technician": "Gökhan", "Notes": ""},
     ]
     support_ws.get_all_values.return_value = [
-        ["Site ID", "Received Date", "Resolved Date", "Type", "Status", "Root Cause", "Reported By", "Issue Summary", "Resolution", "Devices Affected", "Technician", "Notes"],
-        ["MIG-TR-01", "2025-01-10", "2025-01-10", "Visit", "Resolved", "FW Bug", "Ahmet", "3 tags not syncing", "Replaced batteries", "Tags", "Batu", ""],
-        ["MCD-EG-01", "2025-01-18", "", "Visit", "Follow-up (ERG)", "HW Fault (Customer)", "Omar", "2 anchors intermittent", "", "Anchors", "Gökhan", ""],
+        ["Ticket ID", "Site ID", "Received Date", "Resolved Date", "Type", "Status", "Root Cause", "Reported By", "Issue Summary", "Resolution", "Devices Affected", "Technician", "Notes"],
+        ["SUP-001", "MIG-TR-01", "2025-01-10", "2025-01-10", "Visit", "Resolved", "FW Bug", "Ahmet", "3 tags not syncing", "Replaced batteries", "Tags", "Batu", ""],
+        ["SUP-002", "MCD-EG-01", "2025-01-18", "", "Visit", "Follow-up (ERG)", "HW Fault (Customer)", "Omar", "2 anchors intermittent", "", "Anchors", "Gökhan", ""],
     ]
 
     # Implementation Details tab (2 header rows)
@@ -194,7 +194,7 @@ class TestReadSupportLog:
 
 
 class TestAppendSupportLog:
-    def test_append_row(self, sheets_service):
+    def test_append_row_with_ticket_id(self, sheets_service):
         service, ws = sheets_service
         entry = {
             "site_id": "MIG-TR-01",
@@ -210,11 +210,13 @@ class TestAppendSupportLog:
             "technician": "Batu",
             "notes": "",
         }
-        service.append_support_log(entry)
+        ticket_id = service.append_support_log(entry)
+        assert ticket_id == "SUP-003"
         ws["support"].append_row.assert_called_once()
         row = ws["support"].append_row.call_args[0][0]
-        assert row[0] == "MIG-TR-01"
-        assert row[3] == "Remote"
+        assert row[0] == "SUP-003"  # Ticket ID
+        assert row[1] == "MIG-TR-01"  # Site ID
+        assert row[4] == "Remote"  # Type
 
 
 class TestUpdateSupportLog:
@@ -223,6 +225,18 @@ class TestUpdateSupportLog:
         # Update row 3 (second data row = MCD-EG-01 entry) status to Resolved
         service.update_support_log(row_index=3, updates={"Status": "Resolved", "Resolution": "Fixed it"})
         assert ws["support"].update_cell.call_count == 2
+
+    def test_find_by_ticket_id(self, sheets_service):
+        service, ws = sheets_service
+        row = service.find_support_log_row(ticket_id="SUP-002")
+        assert row == 3  # Row 3 = second data row
+
+    def test_list_open_tickets(self, sheets_service):
+        service, ws = sheets_service
+        tickets = service.list_open_tickets("MCD-EG-01")
+        assert len(tickets) == 1
+        assert tickets[0]["ticket_id"] == "SUP-002"
+        assert tickets[0]["issue_summary"] == "2 anchors intermittent"
 
 
 class TestAppendHardware:

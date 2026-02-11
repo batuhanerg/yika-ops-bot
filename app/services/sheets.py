@@ -24,7 +24,7 @@ HARDWARE_COLUMNS = [
 ]
 
 SUPPORT_LOG_COLUMNS = [
-    "Site ID", "Received Date", "Resolved Date", "Type", "Status",
+    "Ticket ID", "Site ID", "Received Date", "Resolved Date", "Type", "Status",
     "Root Cause", "Reported By", "Issue Summary", "Resolution",
     "Devices Affected", "Technician", "Notes",
 ]
@@ -41,6 +41,7 @@ AUDIT_LOG_COLUMNS = [
 
 # Map from snake_case data keys to sheet column names
 _SUPPORT_KEY_MAP = {
+    "ticket_id": "Ticket ID",
     "site_id": "Site ID",
     "received_date": "Received Date",
     "resolved_date": "Resolved Date",
@@ -193,36 +194,94 @@ class SheetsService:
             return [r for r in records if r["Site ID"] == site_id]
         return records
 
-    def append_support_log(self, data: dict[str, Any]) -> None:
+    def _next_ticket_id(self) -> str:
+        """Generate the next ticket ID (SUP-001, SUP-002, etc.)."""
+        ws = self._ws("Support Log")
+        all_values = ws.get_all_values()
+        if len(all_values) < 2:
+            return "SUP-001"
+        # Ticket ID is column A (index 0)
+        max_num = 0
+        for row in all_values[1:]:
+            tid = row[0] if row else ""
+            if tid.startswith("SUP-"):
+                try:
+                    num = int(tid[4:])
+                    max_num = max(max_num, num)
+                except ValueError:
+                    pass
+        return f"SUP-{max_num + 1:03d}"
+
+    def append_support_log(self, data: dict[str, Any]) -> str:
+        """Append a support log entry with auto-generated Ticket ID. Returns the ticket ID."""
+        ticket_id = self._next_ticket_id()
+        data_with_id = {**data, "ticket_id": ticket_id}
         row = []
         for col in SUPPORT_LOG_COLUMNS:
             key = next((k for k, v in _SUPPORT_KEY_MAP.items() if v == col), None)
-            row.append(data.get(key, "") if key else "")
+            val = data_with_id.get(key, "") if key else ""
+            # Convert lists to comma-separated strings (e.g., devices_affected)
+            if isinstance(val, list):
+                val = ", ".join(str(v) for v in val)
+            row.append(val)
         self._ws("Support Log").append_row(row, value_input_option="USER_ENTERED")
+        return ticket_id
 
-    def find_support_log_row(self, site_id: str) -> int | None:
-        """Find the most recent non-resolved support log row for a site. Returns 1-based row index."""
+    def find_support_log_row(self, site_id: str | None = None, ticket_id: str | None = None) -> int | None:
+        """Find a support log row by ticket_id or most recent non-resolved for site_id. Returns 1-based row index."""
         ws = self._ws("Support Log")
         all_values = ws.get_all_values()
         if len(all_values) < 2:
             return None
         headers = all_values[0]
+        ticket_col = headers.index("Ticket ID")
         site_col = headers.index("Site ID")
         status_col = headers.index("Status")
 
-        # Find non-resolved entries for this site (most recent = last row)
-        candidates = []
-        for row_idx, row in enumerate(all_values[1:], start=2):
-            if row[site_col] == site_id and row[status_col] != "Resolved":
-                candidates.append(row_idx)
-
-        if not candidates:
-            # Fall back to any entry for this site
+        # Lookup by ticket ID first
+        if ticket_id:
             for row_idx, row in enumerate(all_values[1:], start=2):
-                if row[site_col] == site_id:
-                    candidates.append(row_idx)
+                if row[ticket_col] == ticket_id:
+                    return row_idx
+            return None
 
-        return candidates[-1] if candidates else None
+        # Lookup by site_id: prefer non-resolved, fall back to any
+        if site_id:
+            candidates = []
+            for row_idx, row in enumerate(all_values[1:], start=2):
+                if row[site_col] == site_id and row[status_col] != "Resolved":
+                    candidates.append(row_idx)
+            if not candidates:
+                for row_idx, row in enumerate(all_values[1:], start=2):
+                    if row[site_col] == site_id:
+                        candidates.append(row_idx)
+            return candidates[-1] if candidates else None
+
+        return None
+
+    def list_open_tickets(self, site_id: str) -> list[dict[str, str]]:
+        """List open (non-resolved) tickets for a site with ID and summary."""
+        ws = self._ws("Support Log")
+        all_values = ws.get_all_values()
+        if len(all_values) < 2:
+            return []
+        headers = all_values[0]
+        ticket_col = headers.index("Ticket ID")
+        site_col = headers.index("Site ID")
+        status_col = headers.index("Status")
+        summary_col = headers.index("Issue Summary")
+        date_col = headers.index("Received Date")
+
+        tickets = []
+        for row in all_values[1:]:
+            if row[site_col] == site_id and row[status_col] != "Resolved":
+                tickets.append({
+                    "ticket_id": row[ticket_col],
+                    "issue_summary": row[summary_col],
+                    "received_date": row[date_col],
+                    "status": row[status_col],
+                })
+        return tickets
 
     def update_support_log(self, row_index: int, updates: dict[str, Any]) -> None:
         ws = self._ws("Support Log")

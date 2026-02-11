@@ -112,3 +112,4 @@ class ParseResult(BaseModel):
     error: str | None = None
     warnings: list[str] | None = None
     language: str = "tr"
+    extra_operations: list[dict] | None = None

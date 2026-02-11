@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from threading import Lock
 from typing import Any
 
 from app.handlers.threads import ThreadStore
@@ -12,6 +14,7 @@ from app.services.claude import ClaudeService
 from app.services.sheets import SheetsService
 from app.services.site_resolver import SiteResolver
 from app.utils.formatters import (
+    build_chain_roadmap,
     format_confirmation_message,
     format_error_message,
     format_help_text,
@@ -23,6 +26,25 @@ logger = logging.getLogger(__name__)
 
 # Shared singletons (initialized in main.py)
 thread_store = ThreadStore()
+
+# Event deduplication to prevent double-processing from Slack retries
+_processed_events: dict[str, float] = {}
+_processed_lock = Lock()
+_DEDUP_TTL = 30  # seconds
+
+
+def _is_duplicate_event(event_ts: str) -> bool:
+    """Check if this event was already processed. Returns True if duplicate."""
+    now = time.time()
+    with _processed_lock:
+        # Clean stale entries
+        stale = [k for k, v in _processed_events.items() if now - v > _DEDUP_TTL]
+        for k in stale:
+            del _processed_events[k]
+        if event_ts in _processed_events:
+            return True
+        _processed_events[event_ts] = now
+        return False
 _claude: ClaudeService | None = None
 _sheets: SheetsService | None = None
 
@@ -65,8 +87,14 @@ def process_message(
     thread_ts: str,
     say,
     client,
+    event_ts: str | None = None,
 ) -> None:
     """Core message processing pipeline: parse → validate → confirm/ask."""
+    # Deduplicate Slack retries and dual-event deliveries
+    if event_ts and _is_duplicate_event(event_ts):
+        logger.info("Skipping duplicate event: %s", event_ts)
+        return
+
     # Handle help command
     if text.lower().strip() in ("yardım", "yardim", "help"):
         say(blocks=format_help_text(), thread_ts=thread_ts)
@@ -101,6 +129,8 @@ def process_message(
         say(text="Mesajınızı işleyemiyorum, lütfen tekrar deneyin.", thread_ts=thread_ts)
         return
 
+    logger.info("Parsed: op=%s data_keys=%s missing=%s", result.operation, list(result.data.keys()), result.missing_fields)
+
     # Handle errors from Claude
     if result.error == "future_date":
         say(
@@ -109,8 +139,30 @@ def process_message(
         )
         return
 
-    if result.error:
-        say(text=f"Hata: {result.error}", thread_ts=thread_ts)
+    if result.operation == "error" or result.error:
+        if result.language == "en":
+            say(text="Something went wrong, please try again.", thread_ts=thread_ts)
+        else:
+            say(text="Bir sorun oluştu, lütfen tekrar deneyin.", thread_ts=thread_ts)
+        return
+
+    # Handle clarify — ask a follow-up question, keep thread state alive
+    if result.operation == "clarify":
+        clarify_msg = result.data.get("message", "")
+        if clarify_msg:
+            # Store thread state so the user's reply continues the conversation
+            messages = thread_context or []
+            messages.append({"role": "user", "content": f"[Sender: {sender_name}]\n{text}"})
+            messages.append({"role": "assistant", "content": json.dumps({"operation": "clarify", "message": clarify_msg}, ensure_ascii=False)})
+            thread_store.set(thread_ts, {
+                "operation": "clarify",
+                "user_id": user_id,
+                "data": {},
+                "missing_fields": [],
+                "messages": messages,
+                "language": result.language,
+            })
+            say(text=clarify_msg, thread_ts=thread_ts)
         return
 
     # Handle help operation
@@ -123,25 +175,36 @@ def process_message(
         _handle_query(result.data, thread_ts, say)
         return
 
-    # Multi-turn enforcement: keep the same operation and merge data
+    # Multi-turn data merge: only when refining the SAME operation
     if existing_state and existing_state.get("operation"):
         original_op = existing_state["operation"]
         original_data = existing_state.get("data", {})
 
-        # Force operation back to the original
-        result.operation = original_op
+        if result.operation == original_op:
+            # Same operation — merge previous data with new fields
+            merged = {**original_data}
+            for k, v in result.data.items():
+                if v and k != "_row_index":
+                    merged[k] = v
+            result.data = merged
+        else:
+            # Different operation — user is correcting, start fresh
+            thread_store.clear(thread_ts)
+            existing_state = None
+            thread_context = None
 
-        # Merge: start with original data, overlay new non-empty fields
-        merged = {**original_data}
-        for k, v in result.data.items():
-            if v and k != "_row_index":  # don't overwrite with empty, preserve internal keys
-                merged[k] = v
-        result.data = merged
+    # Enforce: root_cause "Pending" is only valid for Open status
+    if result.data.get("root_cause") == "Pending" and result.data.get("status") not in ("Open", None, ""):
+        del result.data["root_cause"]
 
     # Validate missing fields against our actual required fields logic
     # (Claude may over-report, e.g. root_cause when status is Open)
     actual_missing = validate_required_fields(result.operation, result.data)
     result.missing_fields = [f for f in result.missing_fields if f in actual_missing]
+    # Also add any newly-missing fields that Claude didn't report
+    for f in actual_missing:
+        if f not in result.missing_fields:
+            result.missing_fields.append(f)
 
     # Build conversation history for multi-turn context
     messages = thread_context or []
@@ -175,18 +238,42 @@ def process_message(
 
     # Resolve update_support row index
     if result.operation == "update_support" and "_row_index" not in result.data:
+        ticket_id = result.data.get("ticket_id", "")
         resolved_site_id = result.data.get("site_id", "")
-        if resolved_site_id:
-            sheets = get_sheets()
-            row_index = sheets.find_support_log_row(resolved_site_id)
-            if row_index:
-                result.data["_row_index"] = row_index
-            else:
-                say(
-                    text=f"`{resolved_site_id}` için güncellenecek destek kaydı bulunamadı.",
-                    thread_ts=thread_ts,
-                )
+        sheets = get_sheets()
+
+        if ticket_id:
+            row_index = sheets.find_support_log_row(ticket_id=ticket_id)
+        elif resolved_site_id:
+            # Check if there are multiple open tickets — if so, ask which one
+            open_tickets = sheets.list_open_tickets(resolved_site_id)
+            if len(open_tickets) > 1:
+                lines = [f"• `{t['ticket_id']}` — {t['issue_summary']} ({t['status']}, {t['received_date']})" for t in open_tickets]
+                msg = f"`{resolved_site_id}` için birden fazla açık ticket var. Hangisini güncellemek istiyorsunuz?\n" + "\n".join(lines)
+                # Store state so user can reply with ticket ID
+                thread_store.set(thread_ts, {
+                    "operation": "update_support",
+                    "user_id": user_id,
+                    "data": result.data,
+                    "missing_fields": [],
+                    "messages": messages,
+                    "language": result.language,
+                })
+                say(text=msg, thread_ts=thread_ts)
                 return
+            row_index = sheets.find_support_log_row(site_id=resolved_site_id)
+        else:
+            row_index = None
+
+        if row_index:
+            result.data["_row_index"] = row_index
+        else:
+            target = ticket_id or resolved_site_id or "?"
+            say(
+                text=f"`{target}` için güncellenecek destek kaydı bulunamadı.",
+                thread_ts=thread_ts,
+            )
+            return
 
     # Check for missing fields
     if result.missing_fields:
@@ -231,8 +318,34 @@ def process_message(
         )
         return
 
+    # Normalize create_site data and extract chained operations
+    pending_ops = None
+    if result.operation == "create_site":
+        extracted_extras = _normalize_create_site_data(result.data)
+        # Prefer Claude's explicit extra_operations, fall back to extracted from data
+        pending_ops = result.extra_operations or extracted_extras
+
+        # Duplicate site_id check
+        site_id = result.data.get("site_id", "")
+        if site_id:
+            try:
+                sheets = get_sheets()
+                existing = sheets.read_sites()
+                if any(s["Site ID"] == site_id for s in existing):
+                    say(
+                        text=(
+                            f"⚠️ `{site_id}` zaten mevcut. Yeni site oluşturmak yerine "
+                            f"güncellemek mi istiyorsunuz?\n"
+                            f"Yeni site olarak devam etmek istiyorsanız lütfen farklı bir Site ID belirtin."
+                        ),
+                        thread_ts=thread_ts,
+                    )
+                    return
+            except Exception:
+                pass  # Don't block on sheet read errors
+
     # All fields present — show confirmation
-    _show_confirmation(result.operation, result.data, user_id, thread_ts, say, text, sender_name, messages)
+    _show_confirmation(result.operation, result.data, user_id, thread_ts, say, text, sender_name, messages, result.language, pending_ops)
 
 
 def _show_confirmation(
@@ -244,12 +357,32 @@ def _show_confirmation(
     raw_message: str,
     sender_name: str,
     messages: list[dict] | None = None,
+    language: str = "tr",
+    pending_operations: list[dict] | None = None,
 ) -> None:
     """Show formatted confirmation with buttons and store state."""
-    display_data = {**data, "operation": operation}
-    blocks = format_confirmation_message(display_data)
+    step_info = None
+    chain_state: dict[str, Any] = {}
 
-    thread_store.set(thread_ts, {
+    if pending_operations:
+        chain_steps = [operation] + [op["operation"] for op in pending_operations]
+        total = len(chain_steps)
+        step_info = (1, total)
+        chain_state = {
+            "chain_steps": chain_steps,
+            "current_step": 1,
+            "total_steps": total,
+            "completed_operations": [],
+            "skipped_operations": [],
+        }
+        # Post roadmap before the first card
+        roadmap = build_chain_roadmap(chain_steps)
+        say(text=roadmap, thread_ts=thread_ts)
+
+    display_data = {**data, "operation": operation}
+    blocks = format_confirmation_message(display_data, step_info=step_info)
+
+    state: dict[str, Any] = {
         "operation": operation,
         "user_id": user_id,
         "data": data,
@@ -257,7 +390,13 @@ def _show_confirmation(
         "raw_message": raw_message,
         "sender_name": sender_name,
         "messages": messages or [],
-    })
+        "language": language,
+    }
+    if pending_operations:
+        state["pending_operations"] = pending_operations
+    state.update(chain_state)
+
+    thread_store.set(thread_ts, state)
 
     say(blocks=blocks, thread_ts=thread_ts)
 
@@ -330,3 +469,79 @@ def _is_valid_site_id_format(s: str) -> bool:
     """Quick check if string looks like a Site ID."""
     import re
     return bool(re.match(r"^[A-Z]{2,4}-[A-Z]{2}-\d{2}$", s))
+
+
+# --- Create Site normalization ---
+
+_COUNTRY_NAMES = {
+    "TR": "Turkey", "EG": "Egypt", "SA": "Saudi Arabia",
+    "AE": "UAE", "US": "USA", "UK": "United Kingdom",
+}
+
+# Valid keys for the Sites tab (snake_case)
+_VALID_SITE_KEYS = {
+    "site_id", "customer", "city", "country", "address", "facility_type",
+    "dashboard_link", "supervisor_1", "phone_1", "email_1",
+    "supervisor_2", "phone_2", "email_2", "go_live_date", "contract_status", "notes",
+}
+
+
+def _normalize_create_site_data(data: dict[str, Any]) -> list[dict] | None:
+    """Normalize create_site data: flatten contacts, fix field names.
+
+    Returns extracted extra_operations if hardware/impl/support data is found in data.
+    """
+    extra_ops: list[dict] = []
+
+    # Flatten contacts array → supervisor_1/phone_1/email_1 etc.
+    contacts = data.pop("contacts", None)
+    if contacts and isinstance(contacts, list):
+        for i, contact in enumerate(contacts[:2], start=1):
+            if isinstance(contact, dict):
+                data.setdefault(f"supervisor_{i}", contact.get("name", ""))
+                data.setdefault(f"phone_{i}", contact.get("phone", ""))
+                data.setdefault(f"email_{i}", contact.get("email", ""))
+
+    # Map dashboard_url → dashboard_link
+    if "dashboard_url" in data:
+        if "dashboard_link" not in data:
+            data["dashboard_link"] = data.pop("dashboard_url")
+        else:
+            data.pop("dashboard_url")
+
+    # Normalize country code to full name
+    country = data.get("country", "")
+    if country and len(country) <= 3:
+        upper = country.upper()
+        if upper in _COUNTRY_NAMES:
+            data["country"] = _COUNTRY_NAMES[upper]
+
+    # Extract hardware entries → update_hardware
+    hardware = data.pop("hardware", None)
+    if hardware:
+        entries = hardware.get("entries", []) if isinstance(hardware, dict) else (hardware if isinstance(hardware, list) else [])
+        if entries:
+            extra_ops.append({"operation": "update_hardware", "data": {"entries": entries}})
+
+    # Extract implementation data → update_implementation
+    implementation = data.pop("implementation", None)
+    if implementation and isinstance(implementation, dict):
+        extra_ops.append({"operation": "update_implementation", "data": implementation})
+
+    # Extract support log data → log_support
+    last_visit_date = data.pop("last_visit_date", None)
+    last_visit_notes = data.pop("last_visit_notes", None)
+    if last_visit_date or last_visit_notes:
+        support_data: dict[str, Any] = {}
+        if last_visit_date:
+            support_data["received_date"] = last_visit_date
+        if last_visit_notes:
+            support_data["issue_summary"] = last_visit_notes
+        extra_ops.append({"operation": "log_support", "data": support_data})
+
+    # Strip non-site keys from data
+    for key in list(data.keys()):
+        if key not in _VALID_SITE_KEYS:
+            data.pop(key)
+
+    return extra_ops if extra_ops else None

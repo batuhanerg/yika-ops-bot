@@ -85,17 +85,35 @@ class ClaudeService:
             parsed = json.loads(json_str)
         except json.JSONDecodeError:
             return ParseResult(
-                operation="unknown",
-                data={},
-                error=f"Failed to parse Claude response as JSON: {raw_text[:200]}",
+                operation="error",
+                data={"_raw": raw_text[:200]},
+                error="json_parse_failure",
             )
 
         operation = parsed.get("operation", "unknown")
+
+        # Handle clarify operation
+        if operation == "clarify":
+            return ParseResult(
+                operation="clarify",
+                data={"message": parsed.get("message", "")},
+                language=parsed.get("language", "tr"),
+            )
+
+        # Handle error operation from Claude
+        if operation == "error":
+            return ParseResult(
+                operation="error",
+                data={"message": parsed.get("message", "")},
+                error=parsed.get("message", "unknown_error"),
+                language=parsed.get("language", "tr"),
+            )
         data = parsed.get("data", {})
         missing_fields = parsed.get("missing_fields", [])
         error = parsed.get("error")
         language = parsed.get("language", "tr")
         warnings: list[str] = parsed.get("warnings") or []
+        extra_operations = parsed.get("extra_operations")
 
         # If Claude already flagged a future date error, preserve it
         if error == "future_date" or data.get("_future_date_warning"):
@@ -128,4 +146,5 @@ class ClaudeService:
             error=error,
             warnings=warnings if warnings else None,
             language=language,
+            extra_operations=extra_operations if extra_operations else None,
         )

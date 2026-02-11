@@ -28,6 +28,8 @@ def register(app: App) -> None:
         channel_type = event.get("channel_type", "")
         thread_ts = event.get("thread_ts") or event.get("ts", "")
 
+        event_ts = event.get("ts", "")
+
         # DMs: always process
         if channel_type == "im":
             logger.info("DM from %s: %s", user_id, text[:80])
@@ -38,6 +40,7 @@ def register(app: App) -> None:
                 thread_ts=thread_ts,
                 say=say,
                 client=client,
+                event_ts=event_ts,
             )
             return
 
@@ -54,4 +57,5 @@ def register(app: App) -> None:
                     thread_ts=thread_ts,
                     say=say,
                     client=client,
+                    event_ts=event_ts,
                 )

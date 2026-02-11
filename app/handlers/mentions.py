@@ -26,6 +26,7 @@ def register(app: App) -> None:
         channel = event.get("channel", "")
         thread_ts = event.get("thread_ts") or event.get("ts", "")
 
+        event_ts = event.get("ts", "")
         logger.info("Mention from %s in %s: %s", user_id, channel, text[:80])
         process_message(
             text=text,
@@ -34,4 +35,5 @@ def register(app: App) -> None:
             thread_ts=thread_ts,
             say=say,
             client=client,
+            event_ts=event_ts,
         )
