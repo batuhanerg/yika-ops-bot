@@ -206,6 +206,15 @@ def process_message(
                 if v and k != "_row_index":
                     merged[k] = v
             result.data = merged
+        elif existing_state.get("missing_fields"):
+            # We were waiting for missing fields — keep original operation and merge
+            # (Claude may re-classify the short reply as a different operation)
+            result.operation = original_op
+            merged = {**original_data}
+            for k, v in result.data.items():
+                if v and k != "_row_index":
+                    merged[k] = v
+            result.data = merged
         else:
             # Different operation — user is correcting, start fresh
             thread_store.clear(thread_ts)

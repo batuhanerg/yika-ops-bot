@@ -39,6 +39,7 @@ ngrok http 8080
 | `SLACK_SIGNING_SECRET` | Slack Signing Secret |
 | `GOOGLE_SHEET_ID` | Google Sheet ID from URL |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | GCP service account JSON (single line) |
+| `SLACK_ANNOUNCE_CHANNEL` | _(Optional)_ Channel ID for deploy announcements |
 
 ## What's Working
 

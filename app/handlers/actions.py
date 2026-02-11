@@ -152,7 +152,7 @@ def register(app: App) -> None:
                         )
 
                 # Send feedback buttons and store feedback context
-                say(blocks=format_feedback_buttons(), thread_ts=thread_ts, channel=channel)
+                say(text="Doğru kaydedildi mi?", blocks=format_feedback_buttons(), thread_ts=thread_ts, channel=channel)
                 thread_store.set(thread_ts, {
                     "feedback_pending": True,
                     "operation": operation,
@@ -252,7 +252,6 @@ def register(app: App) -> None:
             })
             say(blocks=blocks, thread_ts=thread_ts, channel=channel)
         else:
-            thread_store.clear(thread_ts)
             in_chain = bool(chain_steps) and len(chain_steps) > 1
             if in_chain and completed:
                 site_id = state.get("data", {}).get("site_id", "") if state else ""
@@ -265,6 +264,14 @@ def register(app: App) -> None:
                 say(text="❌ İptal edildi. Yanlış anladıysam tekrar yazabilirsiniz.", thread_ts=thread_ts, channel=channel)
             else:
                 say(text="❌ Cancelled. If I misunderstood, feel free to rephrase.", thread_ts=thread_ts, channel=channel)
+
+            # Keep thread alive so user can rephrase after cancel
+            thread_store.set(thread_ts, {
+                "user_id": user_id,
+                "data": {},
+                "messages": state.get("messages", []) if state else [],
+                "language": lang,
+            })
 
     @app.action("feedback_positive")
     def handle_feedback_positive(ack, body, say, client) -> None:

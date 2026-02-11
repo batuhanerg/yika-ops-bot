@@ -1,6 +1,18 @@
 # Changelog
 
-## Session 4 — Polish, Feedback Loop, and Data Quality (2026-02-11)
+## v1.4.0 — Hotfix: Multi-turn Flow, Feedback, and Cancel (2026-02-11)
+
+### Fixed
+- **Missing fields reply lost create_site context** — when Claude re-classified a short reply (e.g., "İstanbul") as `update_site`, the bot cleared all `create_site` data; now keeps original operation when state has `missing_fields`
+- **Feedback buttons not rendering** — `say(blocks=...)` without `text` fallback caused some Slack clients to not display the 👍/👎 buttons
+- **Post-cancel replies ignored** — `thread_store.clear()` on cancel removed all state, so "tekrar yazabilirsiniz" was a lie; now keeps minimal thread state alive after cancel
+
+### Added
+- **Version announcement on deploy** — Mustafa posts a changelog message to the channel on first startup of each version (deduplicated via Audit Log)
+- `app/version.py` with `__version__` and `RELEASE_NOTES`
+- `SLACK_ANNOUNCE_CHANNEL` env var for deploy announcements
+
+## v1.3.0 — Polish, Feedback Loop, and Data Quality (2026-02-11)
 
 ### Added
 - **Follow-up queries in threads** — queries now store thread state, enabling natural multi-query conversations without repeating `@mustafa`
@@ -21,7 +33,6 @@
 - **Stock readback** after stock update confirmations (e.g., "📦 `İstanbul`: stokta toplam 45 birim")
 - **Audit log guardrails** — failed writes logged with `FAILED` operation type (includes error snippet); cancellations logged with `CANCELLED` operation type
 - `_build_audit_summary()` and `_operation_to_tab()` helpers in actions.py
-- 78 new tests across 6 new test files — **181 total, all passing**
 
 ### Fixed
 - **Follow-up queries silently ignored** — queries didn't store thread state, so thread replies after a query were dropped by the message handler
@@ -39,7 +50,7 @@
 - `confirm_action` handler: wraps write in try/except with FAILED audit logging
 - `cancel_action` handler: logs CANCELLED to audit before proceeding with chain
 
-## Session 3 — Cloud Run Deploy + End-to-End Testing (2026-02-10/11)
+## v1.2.0 — Cloud Run Deploy + End-to-End Testing (2026-02-10/11)
 
 ### Added
 - **Dockerfile** and `.dockerignore` for Cloud Run deployment
@@ -56,7 +67,6 @@
 - `build_chain_roadmap()` and `build_chain_final_summary()` formatters
 - `CHAIN_LABELS` dict for short Turkish operation labels
 - `step_info` parameter on `format_confirmation_message` for step indicators
-- 22 new tests (20 chain + 2 sheets) — **103 total, all passing**
 
 ### Fixed
 - **Support log write error** (`gspread APIError: Invalid values — list_value`): `devices_affected` was passed as a Python list; now serialized to comma-separated string
@@ -69,16 +79,7 @@
 - `app/services/sheets.py`: list serialization in `append_support_log`, new methods for stock/hardware reads
 - `app/prompts/system_prompt.md`: added multi-tab extraction rules and last_verified extraction instruction
 
-### Deployed
-- Cloud Run: `europe-west1`, project `yika-ops-bot`
-- Current revision: `mustafa-bot-00010-qzv`
-- Slack Event Subscription URL pointed to Cloud Run service URL
-
-### Known Issues
-- Mid-chain text replies can overwrite chain state (thread lock not yet implemented)
-- Technician name uses Slack display name, not short team name (acceptable for now)
-
-## Session 2 — Sheets + Slack Integration (2026-02-10/11)
+## v1.1.0 — Sheets + Slack Integration (2026-02-10/11)
 
 ### Added
 - Google Sheets service: read/write all tabs (Sites, Hardware, Implementation Details, Support Log, Stock, Audit Log)
@@ -95,7 +96,6 @@
 - Audit Log tab created in Google Sheet with proper headers
 - Query handlers for site summary, open issues, and stock
 - "Pending" root cause enum; root_cause optional when status is Open
-- 23 new tests (14 sheets + 7 threads + 2 validators) — 81 total, all passing
 
 ### Fixed (live testing)
 - Confirm button thread_ts lookup (was using bot message ts instead of thread root)
@@ -109,7 +109,7 @@
 - Trimmed vocabulary.md to enum values + ERG-specific jargon only
 - Trimmed team_context.md: removed duplicate vocabulary sections
 
-## Session 1 — Core Engine (2026-02-10)
+## v1.0.0 — Core Engine (2026-02-10)
 
 ### Added
 - Pydantic models for all 9 operation types with enum definitions and required field mappings
@@ -119,4 +119,3 @@
 - Site resolver with exact match, abbreviation, alias, and fuzzy matching (thefuzz)
 - Slack Block Kit formatters: confirmation messages with buttons, query responses, error messages
 - Turkish help guide text (Kullanim Kilavuzu)
-- 58 tests (10 integration + 48 unit) — all passing
