@@ -35,7 +35,7 @@ class TestTurkishSupportLog:
         assert result.data["type"] == "Visit"
         assert result.data["status"] == "Resolved"
         assert result.data["root_cause"] == "HW Fault (Production)"
-        assert result.data["technician"] == "Gökhan"
+        assert result.data["responsible"] == "Gökhan"
         assert result.data.get("received_date") == str(date.today())
 
 
@@ -49,7 +49,7 @@ class TestMissingFields:
         )
         assert result.operation == "log_support"
         assert len(result.missing_fields) > 0
-        # Should be missing at least: site_id, received_date, status, technician, root_cause
+        # Should be missing at least: site_id, received_date, status, responsible, root_cause
         missing_set = set(result.missing_fields)
         assert "received_date" in missing_set or "site_id" in missing_set
 
@@ -83,11 +83,11 @@ class TestEnglishSupport:
         assert result.data["type"] == "Visit"
         assert result.data["status"] == "Resolved"
         assert result.data["root_cause"] == "HW Fault (Production)"
-        assert result.data["technician"] == "Gökhan"
+        assert result.data["responsible"] == "Gökhan"
 
 
 class TestFirstPerson:
-    """Scenario 5: First person 'ben gittim' → technician = sender."""
+    """Scenario 5: First person 'ben gittim' → responsible = sender."""
 
     def test_first_person_maps_to_sender(self, claude_service: ClaudeService):
         result = claude_service.parse_message(
@@ -95,7 +95,7 @@ class TestFirstPerson:
             sender_name="Batu",
         )
         assert result.operation == "log_support"
-        assert result.data["technician"] == "Batu"
+        assert result.data["responsible"] == "Batu"
 
 
 class TestCreateSite:

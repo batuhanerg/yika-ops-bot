@@ -30,3 +30,10 @@ def get_google_sheet_id() -> str:
 
 def get_google_service_account_json() -> str:
     return os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+
+
+def get_google_sheet_url() -> str:
+    return os.environ.get(
+        "GOOGLE_SHEET_URL",
+        "https://docs.google.com/spreadsheets/d/1EKES13uQiKyw8HfOrHbJvLQymhj_LwK_KKpbJq2cxYQ",
+    )

@@ -2,7 +2,7 @@
 
 ## Team Members
 
-| Slack Display Name | Technician Name | Role |
+| Slack Display Name | Responsible Name | Role |
 |---|---|---|
 | Batu / Batuhan | Batu | Founder — remote support, business ops |
 | Mehmet | Mehmet | Co-founder — day-to-day operations |

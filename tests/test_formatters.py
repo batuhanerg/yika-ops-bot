@@ -20,7 +20,7 @@ class TestConfirmationMessage:
             "status": "Resolved",
             "root_cause": "HW Fault (Production)",
             "issue_summary": "2 tag değiştirildi",
-            "technician": "Gökhan",
+            "responsible": "Gökhan",
             "resolved_date": "2025-01-15",
             "resolution": "Kartlar değiştirildi",
         }
@@ -43,7 +43,7 @@ class TestConfirmationMessage:
             "status": "Open",
             "root_cause": "User Error",
             "issue_summary": "Test issue",
-            "technician": "Batu",
+            "responsible": "Batu",
         }
         blocks = format_confirmation_message(data)
 

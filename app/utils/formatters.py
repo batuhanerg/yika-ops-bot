@@ -18,7 +18,7 @@ FIELD_LABELS: dict[str, str] = {
     "issue_summary": "Issue Summary",
     "resolution": "Resolution",
     "devices_affected": "Devices Affected",
-    "technician": "Technician",
+    "responsible": "Responsible",
     "notes": "Notes",
     "customer": "Customer",
     "city": "City",
@@ -193,14 +193,14 @@ def format_error_message(error_type: str, **kwargs: Any) -> list[dict]:
                 ),
             },
         })
-    elif error_type == "unknown_technician":
+    elif error_type == "unknown_responsible":
         name = kwargs.get("name", "?")
         team = kwargs.get("team", [])
         blocks.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"⚠️ Teknisyen *\"{name}\"* tanımlı değil. Ekip: {', '.join(team)}.",
+                "text": f"⚠️ *\"{name}\"* tanımlı değil. Ekip: {', '.join(team)}.",
             },
         })
     elif error_type == "future_date":
@@ -276,7 +276,11 @@ def format_help_text() -> list[dict]:
                 "🔍 *Bilgi Sorgula*\n"
                 "`@mustafa ASM'nin durumu ne?`\n"
                 "`@mustafa tüm sitelerde açık ticket var mı?`\n"
-                "`@mustafa stokta kaç tag var?`"
+                "`@mustafa stokta kaç tag var?`\n\n"
+                "📊 *Veri Kalitesi*\n"
+                "`@mustafa eksik bilgiler var mı?`\n"
+                "`@mustafa hangi veriler eski?`\n"
+                "`@mustafa ASM'nin eksik bilgileri ne?`"
             ),
         },
     })
@@ -295,6 +299,97 @@ def format_help_text() -> list[dict]:
                 "• Gelecek tarihli destek kaydı oluşturulamaz"
             ),
         },
+    })
+
+    from app.config import get_google_sheet_url
+    sheet_url = get_google_sheet_url()
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": f"📎 *Google Sheet:* <{sheet_url}|Tablo Linki>",
+        },
+    })
+
+    return blocks
+
+
+def format_feedback_buttons() -> list[dict]:
+    """Format a follow-up message with 👍/👎 buttons after a write action."""
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Doğru kaydedildi mi?",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "👍 Evet"},
+                    "action_id": "feedback_positive",
+                    "value": "positive",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "👎 Hayır"},
+                    "action_id": "feedback_negative",
+                    "value": "negative",
+                },
+            ],
+        },
+    ]
+
+
+def format_data_quality_response(
+    check_type: str, issues: list[dict[str, str]], site_id: str | None = None,
+) -> list[dict]:
+    """Format data quality check results as Slack Block Kit blocks."""
+    blocks: list[dict] = []
+
+    if check_type == "missing_data":
+        scope = f"`{site_id}`" if site_id else "Tüm siteler"
+        title = f"📊 Eksik Veri Raporu — {scope}"
+    else:
+        scope = f"`{site_id}`" if site_id else "Tüm siteler"
+        title = f"📊 Eski Veri Raporu — {scope}"
+
+    blocks.append({
+        "type": "header",
+        "text": {"type": "plain_text", "text": title},
+    })
+
+    if not issues:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "✅ Sorun bulunamadı."},
+        })
+        return blocks
+
+    # Group issues by site_id
+    by_site: dict[str, list[dict[str, str]]] = {}
+    for issue in issues:
+        sid = issue.get("site_id", "?")
+        by_site.setdefault(sid, []).append(issue)
+
+    for sid, site_issues in by_site.items():
+        lines = [f"*`{sid}`* ({len(site_issues)} sorun):"]
+        for iss in site_issues:
+            tab = iss.get("tab", "")
+            detail = iss.get("detail", "")
+            lines.append(f"  • _{tab}:_ {detail}")
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "\n".join(lines)},
+        })
+
+    blocks.append({"type": "divider"})
+    blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": f"Toplam: {len(issues)} sorun bulundu."}],
     })
 
     return blocks

@@ -30,16 +30,16 @@ class TestAccumulateData:
             "operation": "log_support",
             "user_id": "U1",
             "data": {"site_id": "MIG-TR-01", "type": "Visit"},
-            "missing_fields": ["received_date", "status", "technician"],
+            "missing_fields": ["received_date", "status", "responsible"],
         })
         store.merge("T002", {
-            "data": {"received_date": "2025-01-15", "status": "Resolved", "technician": "Batu"},
+            "data": {"received_date": "2025-01-15", "status": "Resolved", "responsible": "Batu"},
             "missing_fields": [],
         })
         state = store.get("T002")
         assert state["data"]["site_id"] == "MIG-TR-01"
         assert state["data"]["received_date"] == "2025-01-15"
-        assert state["data"]["technician"] == "Batu"
+        assert state["data"]["responsible"] == "Batu"
         assert state["missing_fields"] == []
 
 

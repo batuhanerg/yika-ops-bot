@@ -1,6 +1,6 @@
 # Changelog
 
-## Session 4 — Query System + Conversational Context (2026-02-11)
+## Session 4 — Polish, Feedback Loop, and Data Quality (2026-02-11)
 
 ### Added
 - **Follow-up queries in threads** — queries now store thread state, enabling natural multi-query conversations without repeating `@mustafa`
@@ -10,17 +10,34 @@
   - Support history: last 10 entries with status icons
   - Ticket detail: all fields for a specific ticket (e.g., SUP-004)
 - **Context inheritance across operation transitions** — `site_id` and `ticket_id` carry forward from query → write and clarify → write transitions, so users don't need to re-specify identifiers
+- **Feedback loop** — 👍/👎 buttons after every write operation; negative feedback captures "what should have happened" and writes to Feedback tab
+- **Renamed Technician → Responsible** globally (code fields, prompts, sheet column header)
+- **Google Sheet link** in help text and post-action readback messages via `get_google_sheet_url()`
+- **Data quality queries** — two new query types:
+  - `missing_data`: scans Sites, Hardware, Support Log for empty/incomplete fields
+  - `stale_data`: reports records where Last Verified > 30 days old (configurable threshold)
+- `format_data_quality_response()` formatter — groups issues by site with counts
+- `read_all_implementation()` on SheetsService for cross-site stale data scans
+- **Stock readback** after stock update confirmations (e.g., "📦 `İstanbul`: stokta toplam 45 birim")
+- **Audit log guardrails** — failed writes logged with `FAILED` operation type (includes error snippet); cancellations logged with `CANCELLED` operation type
+- `_build_audit_summary()` and `_operation_to_tab()` helpers in actions.py
+- 78 new tests across 6 new test files — **181 total, all passing**
 
 ### Fixed
 - **Follow-up queries silently ignored** — queries didn't store thread state, so thread replies after a query were dropped by the message handler
 - **Clarify → write lost context** — clarify handler stored empty `data: {}`, losing `site_id`/`ticket_id` from previous state; multi-turn merge then cleared thread context on operation change
 - **Query → write lost identifiers** — transitioning from a query to a write operation (e.g., "add a note to this ticket") cleared state and required re-specifying site_id
+- **Stock readback always empty** — `_build_readback()` returned "" early when no `site_id`, but stock uses `location` not `site_id`; moved stock handler before the early return
+- **Flaky `test_missing_fields_detected`** — Claude Haiku sometimes returned `clarify` instead of `log_support` for messages with many missing fields; sharpened prompt boundary between `clarify` (ambiguous intent) and `missing_fields` (known operation, incomplete data)
 
 ### Changed
 - `_handle_query` now accepts `user_id`, `messages`, `language` params and stores thread state after every query response
 - Clarify handler carries forward `site_id`/`ticket_id` from existing state into clarify state data
 - Multi-turn merge treats `query` and `clarify` as transparent — inherits identifiers instead of clearing state
-- System prompt: added `ticket_detail` query type with `ticket_id` extraction instruction
+- System prompt: added `missing_data`/`stale_data` query types, sharpened `clarify` vs `missing_fields` boundary, strengthened `log_support` instruction
+- Help text: added "Veri Kalitesi" section with data quality query examples
+- `confirm_action` handler: wraps write in try/except with FAILED audit logging
+- `cancel_action` handler: logs CANCELLED to audit before proceeding with chain
 
 ## Session 3 — Cloud Run Deploy + End-to-End Testing (2026-02-10/11)
 

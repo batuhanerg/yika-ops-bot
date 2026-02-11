@@ -26,7 +26,7 @@ HARDWARE_COLUMNS = [
 SUPPORT_LOG_COLUMNS = [
     "Ticket ID", "Site ID", "Received Date", "Resolved Date", "Type", "Status",
     "Root Cause", "Reported By", "Issue Summary", "Resolution",
-    "Devices Affected", "Technician", "Notes",
+    "Devices Affected", "Responsible", "Notes",
 ]
 
 STOCK_COLUMNS = [
@@ -37,6 +37,11 @@ STOCK_COLUMNS = [
 AUDIT_LOG_COLUMNS = [
     "Timestamp", "Slack User", "Operation", "Target Tab",
     "Site ID", "Summary", "Raw Message",
+]
+
+FEEDBACK_COLUMNS = [
+    "Timestamp", "User", "Operation", "Site ID", "Ticket ID",
+    "Rating", "Expected Behavior", "Original Message",
 ]
 
 # Map from snake_case data keys to sheet column names
@@ -52,7 +57,7 @@ _SUPPORT_KEY_MAP = {
     "issue_summary": "Issue Summary",
     "resolution": "Resolution",
     "devices_affected": "Devices Affected",
-    "technician": "Technician",
+    "responsible": "Responsible",
     "notes": "Notes",
 }
 
@@ -159,6 +164,19 @@ class SheetsService:
             if row and row[0] == site_id:
                 return {headers[i]: row[i] for i in range(len(headers)) if i < len(row)}
         return {}
+
+    def read_all_implementation(self) -> list[dict[str, Any]]:
+        """Read all rows from Implementation Details as a list of dicts."""
+        ws = self._ws("Implementation Details")
+        all_values = ws.get_all_values()
+        if len(all_values) < 3:
+            return []
+        headers = all_values[1]  # Row 2 has field names
+        results = []
+        for row in all_values[2:]:
+            if row and row[0]:
+                results.append({headers[i]: row[i] for i in range(len(headers)) if i < len(row)})
+        return results
 
     def update_implementation(self, site_id: str, updates: dict[str, Any]) -> None:
         ws = self._ws("Implementation Details")
@@ -328,3 +346,19 @@ class SheetsService:
         timestamp = datetime.now(timezone.utc).isoformat()
         row = [timestamp, user, operation, target_tab, site_id, summary, raw_message]
         self._ws("Audit Log").append_row(row, value_input_option="USER_ENTERED")
+
+    # --- Feedback ---
+
+    def append_feedback(
+        self,
+        user: str,
+        operation: str,
+        site_id: str,
+        ticket_id: str,
+        rating: str,
+        expected_behavior: str,
+        original_message: str,
+    ) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        row = [timestamp, user, operation, site_id, ticket_id, rating, expected_behavior, original_message]
+        self._ws("Feedback").append_row(row, value_input_option="USER_ENTERED")

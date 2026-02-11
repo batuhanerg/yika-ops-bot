@@ -13,9 +13,11 @@ from app.models.operations import TEAM_MEMBERS
 from app.services.claude import ClaudeService
 from app.services.sheets import SheetsService
 from app.services.site_resolver import SiteResolver
+from app.services.data_quality import find_missing_data, find_stale_data
 from app.utils.formatters import (
     build_chain_roadmap,
     format_confirmation_message,
+    format_data_quality_response,
     format_error_message,
     format_help_text,
     format_query_response,
@@ -573,6 +575,21 @@ def _handle_query(
                     continue
                 lines.append(f"• *{key}:* {value}")
             say(text="\n".join(lines), thread_ts=thread_ts)
+
+        elif query_type == "missing_data":
+            sites = sheets.read_sites()
+            hardware = sheets.read_hardware(site_id) if site_id else sheets.read_hardware()
+            support = sheets.read_support_log(site_id) if site_id else sheets.read_support_log()
+            issues = find_missing_data(sites=sites, hardware=hardware, support=support, site_id=site_id)
+            blocks = format_data_quality_response("missing_data", issues, site_id)
+            say(blocks=blocks, thread_ts=thread_ts)
+
+        elif query_type == "stale_data":
+            hardware = sheets.read_hardware(site_id) if site_id else sheets.read_hardware()
+            implementation = sheets.read_all_implementation()
+            issues = find_stale_data(hardware=hardware, implementation=implementation, site_id=site_id)
+            blocks = format_data_quality_response("stale_data", issues, site_id)
+            say(blocks=blocks, thread_ts=thread_ts)
 
         else:
             say(text=f"Bu sorgu türü henüz desteklenmiyor: {query_type}", thread_ts=thread_ts)

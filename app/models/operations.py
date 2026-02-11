@@ -59,7 +59,7 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
         "type",
         "status",
         "issue_summary",
-        "technician",
+        "responsible",
     ],
     "create_site": [
         "customer",

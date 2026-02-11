@@ -11,6 +11,7 @@ from app.services.sheets import SheetsService
 from app.utils.formatters import (
     build_chain_final_summary,
     format_confirmation_message,
+    format_feedback_buttons,
     OPERATION_TITLES,
 )
 
@@ -132,14 +133,15 @@ def register(app: App) -> None:
             else:
                 # No more pending — finalize
                 in_chain = bool(chain_steps) and len(chain_steps) > 1
+                readback_with_link = _build_readback_with_link(readback)
                 if in_chain:
                     site_id = data.get("site_id", "")
                     completed_ops = {item["operation"] for item in completed}
                     summary = build_chain_final_summary(site_id, chain_steps, completed_ops, set(skipped))
-                    text = f"✅ {readback}\n\n{summary}" if readback else summary
+                    text = f"✅ {readback}\n\n{summary}\n{_build_readback_with_link('')}" if readback else f"{summary}\n{_build_readback_with_link('')}"
                     say(text=text, thread_ts=thread_ts, channel=channel)
                 else:
-                    say(text=f"✅ İşlem tamamlandı.\n{readback}", thread_ts=thread_ts, channel=channel)
+                    say(text=f"✅ İşlem tamamlandı.\n{readback_with_link}", thread_ts=thread_ts, channel=channel)
 
                     # Stock cross-reference check (only for non-chained single operations)
                     if _should_ask_stock(operation, data, raw_message):
@@ -149,10 +151,34 @@ def register(app: App) -> None:
                             channel=channel,
                         )
 
-                thread_store.clear(thread_ts)
+                # Send feedback buttons and store feedback context
+                say(blocks=format_feedback_buttons(), thread_ts=thread_ts, channel=channel)
+                thread_store.set(thread_ts, {
+                    "feedback_pending": True,
+                    "operation": operation,
+                    "user_id": user_id,
+                    "data": data,
+                    "ticket_id": ticket_id or "",
+                    "raw_message": raw_message,
+                    "sender_name": sender_name,
+                    "language": state.get("language", "tr"),
+                })
 
         except Exception as e:
             logger.exception("Write error")
+            # Log the failed write attempt to Audit Log
+            try:
+                sheets = get_sheets()
+                sheets.append_audit_log(
+                    user=sender_name,
+                    operation="FAILED",
+                    target_tab=_operation_to_tab(operation),
+                    site_id=data.get("site_id", ""),
+                    summary=f"FAILED: {_build_audit_summary(operation, data)} — {str(e)[:100]}",
+                    raw_message=raw_message,
+                )
+            except Exception:
+                logger.exception("Could not log failed write to audit")
             say(text="Sheets'e yazamadım, lütfen tekrar deneyin.", thread_ts=thread_ts, channel=channel)
 
     @app.action("cancel_action")
@@ -177,9 +203,21 @@ def register(app: App) -> None:
         current_step = state.get("current_step", 0) if state else 0
         total_steps = state.get("total_steps", 0) if state else 0
 
-        # Track current operation as skipped
+        # Track current operation as skipped and log to audit
         if state:
             skipped.append(state["operation"])
+            try:
+                sheets = get_sheets()
+                sheets.append_audit_log(
+                    user=state.get("sender_name", "Unknown"),
+                    operation="CANCELLED",
+                    target_tab=_operation_to_tab(state["operation"]),
+                    site_id=state.get("data", {}).get("site_id", ""),
+                    summary=f"CANCELLED: {_build_audit_summary(state['operation'], state.get('data', {}))}",
+                    raw_message=state.get("raw_message", ""),
+                )
+            except Exception:
+                logger.exception("Could not log cancellation to audit")
 
         if pending:
             next_op = pending.pop(0)
@@ -227,6 +265,55 @@ def register(app: App) -> None:
                 say(text="❌ İptal edildi. Yanlış anladıysam tekrar yazabilirsiniz.", thread_ts=thread_ts, channel=channel)
             else:
                 say(text="❌ Cancelled. If I misunderstood, feel free to rephrase.", thread_ts=thread_ts, channel=channel)
+
+    @app.action("feedback_positive")
+    def handle_feedback_positive(ack, body, say, client) -> None:
+        ack()
+
+        msg = body.get("message", {})
+        thread_ts = msg.get("thread_ts") or msg.get("ts", "")
+        channel = body.get("channel", {}).get("id", "")
+
+        state = thread_store.get(thread_ts)
+        if not state or not state.get("feedback_pending"):
+            return
+
+        try:
+            sheets = get_sheets()
+            sheets.append_feedback(
+                user=state.get("sender_name", "Unknown"),
+                operation=state.get("operation", ""),
+                site_id=state.get("data", {}).get("site_id", ""),
+                ticket_id=state.get("ticket_id", ""),
+                rating="positive",
+                expected_behavior="",
+                original_message=state.get("raw_message", ""),
+            )
+        except Exception:
+            logger.exception("Feedback write error")
+
+        thread_store.clear(thread_ts)
+
+    @app.action("feedback_negative")
+    def handle_feedback_negative(ack, body, say, client) -> None:
+        ack()
+
+        msg = body.get("message", {})
+        thread_ts = msg.get("thread_ts") or msg.get("ts", "")
+        channel = body.get("channel", {}).get("id", "")
+
+        state = thread_store.get(thread_ts)
+        if not state or not state.get("feedback_pending"):
+            return
+
+        # Ask for details — store state awaiting response
+        thread_store.set(thread_ts, {
+            **state,
+            "feedback_pending": False,
+            "feedback_awaiting_response": True,
+        })
+
+        say(text="Ne olmalıydı? Lütfen doğru bilgiyi yazın.", thread_ts=thread_ts, channel=channel)
 
 
 def _execute_write(sheets: SheetsService, operation: str, data: dict[str, Any]) -> str | None:
@@ -310,11 +397,19 @@ def _build_audit_summary(operation: str, data: dict[str, Any]) -> str:
 
 def _build_readback(sheets: SheetsService, operation: str, data: dict[str, Any], ticket_id: str | None = None) -> str:
     """Build a contextual readback summary after a write."""
-    site_id = data.get("site_id", "")
-    if not site_id:
-        return ""
-
     try:
+        # Stock has location instead of site_id — handle separately
+        if operation == "update_stock":
+            location = data.get("location", "")
+            stock = sheets.read_stock(location or None)
+            total_items = sum(int(s.get("Qty", 0)) for s in stock)
+            scope = f"`{location}`" if location else "Tüm depolar"
+            return f"📦 {scope}: stokta toplam {total_items} birim."
+
+        site_id = data.get("site_id", "")
+        if not site_id:
+            return ""
+
         if operation == "log_support":
             logs = sheets.read_support_log(site_id)
             total = len(logs)
@@ -339,6 +434,16 @@ def _build_readback(sheets: SheetsService, operation: str, data: dict[str, Any],
         return ""
     except Exception:
         return ""
+
+
+def _build_readback_with_link(readback: str) -> str:
+    """Append the Google Sheet link to a readback message."""
+    from app.config import get_google_sheet_url
+    sheet_url = get_google_sheet_url()
+    link_line = f"Detaylar için: <{sheet_url}|Google Sheet>"
+    if readback:
+        return f"{readback}\n{link_line}"
+    return link_line
 
 
 def _should_ask_stock(operation: str, data: dict[str, Any], raw_message: str) -> bool:

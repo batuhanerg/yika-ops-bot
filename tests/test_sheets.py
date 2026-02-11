@@ -82,11 +82,11 @@ def mock_gspread():
     support_ws = MagicMock()
     support_ws.title = "Support Log"
     support_ws.get_all_records.return_value = [
-        {"Ticket ID": "SUP-001", "Site ID": "MIG-TR-01", "Received Date": "2025-01-10", "Resolved Date": "2025-01-10", "Type": "Visit", "Status": "Resolved", "Root Cause": "FW Bug", "Reported By": "Ahmet", "Issue Summary": "3 tags not syncing", "Resolution": "Replaced batteries", "Devices Affected": "Tags", "Technician": "Batu", "Notes": ""},
-        {"Ticket ID": "SUP-002", "Site ID": "MCD-EG-01", "Received Date": "2025-01-18", "Resolved Date": "", "Type": "Visit", "Status": "Follow-up (ERG)", "Root Cause": "HW Fault (Customer)", "Reported By": "Omar", "Issue Summary": "2 anchors intermittent", "Resolution": "", "Devices Affected": "Anchors", "Technician": "Gökhan", "Notes": ""},
+        {"Ticket ID": "SUP-001", "Site ID": "MIG-TR-01", "Received Date": "2025-01-10", "Resolved Date": "2025-01-10", "Type": "Visit", "Status": "Resolved", "Root Cause": "FW Bug", "Reported By": "Ahmet", "Issue Summary": "3 tags not syncing", "Resolution": "Replaced batteries", "Devices Affected": "Tags", "Responsible": "Batu", "Notes": ""},
+        {"Ticket ID": "SUP-002", "Site ID": "MCD-EG-01", "Received Date": "2025-01-18", "Resolved Date": "", "Type": "Visit", "Status": "Follow-up (ERG)", "Root Cause": "HW Fault (Customer)", "Reported By": "Omar", "Issue Summary": "2 anchors intermittent", "Resolution": "", "Devices Affected": "Anchors", "Responsible": "Gökhan", "Notes": ""},
     ]
     support_ws.get_all_values.return_value = [
-        ["Ticket ID", "Site ID", "Received Date", "Resolved Date", "Type", "Status", "Root Cause", "Reported By", "Issue Summary", "Resolution", "Devices Affected", "Technician", "Notes"],
+        ["Ticket ID", "Site ID", "Received Date", "Resolved Date", "Type", "Status", "Root Cause", "Reported By", "Issue Summary", "Resolution", "Devices Affected", "Responsible", "Notes"],
         ["SUP-001", "MIG-TR-01", "2025-01-10", "2025-01-10", "Visit", "Resolved", "FW Bug", "Ahmet", "3 tags not syncing", "Replaced batteries", "Tags", "Batu", ""],
         ["SUP-002", "MCD-EG-01", "2025-01-18", "", "Visit", "Follow-up (ERG)", "HW Fault (Customer)", "Omar", "2 anchors intermittent", "", "Anchors", "Gökhan", ""],
     ]
@@ -207,7 +207,7 @@ class TestAppendSupportLog:
             "issue_summary": "False alarm",
             "resolution": "Data delay explained",
             "devices_affected": "",
-            "technician": "Batu",
+            "responsible": "Batu",
             "notes": "",
         }
         ticket_id = service.append_support_log(entry)

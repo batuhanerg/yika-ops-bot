@@ -104,7 +104,7 @@ class TestRequiredFields:
             "status": "Resolved",
             "root_cause": "HW Fault (Production)",
             "issue_summary": "Tag replacement",
-            "technician": "Gökhan",
+            "responsible": "Gökhan",
             "resolved_date": "2025-01-15",
             "resolution": "Tags replaced",
         }
@@ -120,7 +120,7 @@ class TestRequiredFields:
         assert "received_date" in missing
         assert "status" in missing
         assert "issue_summary" in missing
-        assert "technician" in missing
+        assert "responsible" in missing
         # root_cause is NOT in base required fields — it's conditional on status
 
     def test_support_log_open_no_root_cause_required(self):
@@ -130,7 +130,7 @@ class TestRequiredFields:
             "type": "Call",
             "status": "Open",
             "issue_summary": "Tag data issue",
-            "technician": "Batu",
+            "responsible": "Batu",
         }
         missing = validate_required_fields("log_support", data)
         assert missing == []  # root_cause not required for Open
@@ -142,7 +142,7 @@ class TestRequiredFields:
             "type": "Visit",
             "status": "Follow-up (ERG)",
             "issue_summary": "Tag replacement",
-            "technician": "Gökhan",
+            "responsible": "Gökhan",
         }
         missing = validate_required_fields("log_support", data)
         assert "root_cause" in missing
@@ -154,7 +154,7 @@ class TestRequiredFields:
             "type": "Visit",
             "status": "Resolved",
             "issue_summary": "Tag replacement",
-            "technician": "Gökhan",
+            "responsible": "Gökhan",
             "resolved_date": "2025-01-15",
             # resolution and root_cause missing
         }

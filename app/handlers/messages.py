@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.handlers.common import process_message, thread_store
+from app.handlers.common import get_sheets, process_message, thread_store
 
 if TYPE_CHECKING:
     from slack_bolt import App
@@ -29,6 +29,29 @@ def register(app: App) -> None:
         thread_ts = event.get("thread_ts") or event.get("ts", "")
 
         event_ts = event.get("ts", "")
+
+        # Check for feedback response (after 👎 was clicked)
+        if event.get("thread_ts"):
+            state = thread_store.get(thread_ts)
+            if state and state.get("feedback_awaiting_response"):
+                logger.info("Feedback response from %s: %s", user_id, text[:80])
+                try:
+                    sheets = get_sheets()
+                    sheets.append_feedback(
+                        user=state.get("sender_name", "Unknown"),
+                        operation=state.get("operation", ""),
+                        site_id=state.get("data", {}).get("site_id", ""),
+                        ticket_id=state.get("ticket_id", ""),
+                        rating="negative",
+                        expected_behavior=text,
+                        original_message=state.get("raw_message", ""),
+                    )
+                    say(text="Teşekkürler, geri bildiriminiz kaydedildi.", thread_ts=thread_ts)
+                except Exception:
+                    logger.exception("Feedback write error")
+                    say(text="Geri bildirim kaydedilemedi, lütfen tekrar deneyin.", thread_ts=thread_ts)
+                thread_store.clear(thread_ts)
+                return
 
         # DMs: always process
         if channel_type == "im":

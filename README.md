@@ -4,7 +4,7 @@ A Slack bot for ERG Controls that manages IoT customer support operations throug
 
 ## Status
 
-**Session 4: Query System + Conversational Context** — Complete (103 tests passing)
+**Session 4: Polish, Feedback Loop, and Data Quality** — Complete (181 tests passing)
 Deployed to Cloud Run (`europe-west1`), live in `#technical-operations`.
 
 ## Quick Start
@@ -68,10 +68,16 @@ ngrok http 8080
 - Duplicate site_id prevention
 - Event deduplication against Slack retries
 
-### Session 4: Query System + Conversational Context
+### Session 4: Polish, Feedback Loop, and Data Quality
 - **Conversational queries** — follow-up questions in threads work naturally (site summary → implementation → hardware → ticket detail)
 - New query types: implementation, hardware, support_history, ticket_detail
 - Context inheritance: `site_id`/`ticket_id` carry forward across query → write and clarify → write transitions
+- **Feedback loop** — 👍/👎 buttons after every write, negative feedback captures "what should have happened" → Feedback tab
+- **Renamed Technician → Responsible** globally (code, prompts, sheet column)
+- **Google Sheet link** in help text and post-action readback messages
+- **Data quality queries** — `missing_data` and `stale_data` query types scan for incomplete/outdated records
+- **Stock readback** after stock update confirmations
+- **Audit log guardrails** — failed writes and cancellations now logged with FAILED/CANCELLED operation types
 
 ## Project Structure
 
@@ -83,7 +89,8 @@ app/
 ├── services/
 │   ├── claude.py           — Claude API integration + prompt building
 │   ├── sheets.py           — Google Sheets read/write operations
-│   └── site_resolver.py    — Customer name → Site ID resolution
+│   ├── site_resolver.py    — Customer name → Site ID resolution
+│   └── data_quality.py     — Missing/stale data detection
 ├── handlers/
 │   ├── common.py           — Shared message processing pipeline
 │   ├── mentions.py         — @mustafa mention handler
@@ -105,7 +112,13 @@ tests/
 ├── test_formatters.py      — Message formatting (6 tests)
 ├── test_sheets.py          — Sheets operations (16 tests, mocked)
 ├── test_threads.py         — Thread state (7 tests)
-└── test_chain.py           — Chain wizard + normalization (20 tests)
+├── test_chain.py           — Chain wizard + normalization (20 tests)
+├── test_data_quality.py    — Missing/stale data queries (19 tests)
+├── test_stock_audit.py     — Stock readback + key mapping (5 tests)
+├── test_audit_guardrails.py — Failed/cancelled audit logging (12 tests)
+├── test_feedback.py        — Feedback loop (thumbs up/down)
+├── test_rename_responsible.py — Technician→Responsible rename
+└── test_help_and_readback.py  — Help text + Sheet link readback
 ```
 
 ### Deploy to Cloud Run
