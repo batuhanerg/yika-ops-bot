@@ -4,7 +4,7 @@ A Slack bot for ERG Controls that manages IoT customer support operations throug
 
 ## Status
 
-**Session 3: Cloud Run Deploy + E2E Testing** — Complete (103 tests passing)
+**Session 4: Query System + Conversational Context** — Complete (103 tests passing)
 Deployed to Cloud Run (`europe-west1`), live in `#technical-operations`.
 
 ## Quick Start
@@ -67,6 +67,11 @@ ngrok http 8080
 - Last Verified date auto-injected for hardware/implementation writes
 - Duplicate site_id prevention
 - Event deduplication against Slack retries
+
+### Session 4: Query System + Conversational Context
+- **Conversational queries** — follow-up questions in threads work naturally (site summary → implementation → hardware → ticket detail)
+- New query types: implementation, hardware, support_history, ticket_detail
+- Context inheritance: `site_id`/`ticket_id` carry forward across query → write and clarify → write transitions
 
 ## Project Structure
 

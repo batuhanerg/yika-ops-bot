@@ -79,7 +79,8 @@ For extra log_support: use standard support fields (received_date, resolved_date
 **Last Verified date:** For hardware and implementation data, extract a `last_verified` date if the user mentions when they last confirmed the info (e.g., "en son 2 Aralık'ta teyit ettim", "last verified December 2"). If not mentioned, omit the field — the system will default to today's date.
 
 ### Query
-Include query_type: site_summary, open_issues, stock, support_history, hardware, implementation, aggregate
+Include query_type: site_summary, open_issues, stock, support_history, hardware, implementation, ticket_detail, aggregate
+- For `ticket_detail`: when user asks about a specific ticket (e.g., "SUP-004 detayları", "ticket SUP-004"), include `ticket_id` in data.
 
 ### Bulk Hardware
 Multiple devices → entries list: `{"entries": [{"device_type": "Tag", "qty": 32}, ...]}`

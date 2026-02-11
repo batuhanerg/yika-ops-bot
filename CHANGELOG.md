@@ -1,5 +1,27 @@
 # Changelog
 
+## Session 4 — Query System + Conversational Context (2026-02-11)
+
+### Added
+- **Follow-up queries in threads** — queries now store thread state, enabling natural multi-query conversations without repeating `@mustafa`
+- **New query types**: `implementation`, `hardware`, `support_history`, `ticket_detail`
+  - Implementation: shows all site configuration parameters
+  - Hardware: lists device inventory with totals
+  - Support history: last 10 entries with status icons
+  - Ticket detail: all fields for a specific ticket (e.g., SUP-004)
+- **Context inheritance across operation transitions** — `site_id` and `ticket_id` carry forward from query → write and clarify → write transitions, so users don't need to re-specify identifiers
+
+### Fixed
+- **Follow-up queries silently ignored** — queries didn't store thread state, so thread replies after a query were dropped by the message handler
+- **Clarify → write lost context** — clarify handler stored empty `data: {}`, losing `site_id`/`ticket_id` from previous state; multi-turn merge then cleared thread context on operation change
+- **Query → write lost identifiers** — transitioning from a query to a write operation (e.g., "add a note to this ticket") cleared state and required re-specifying site_id
+
+### Changed
+- `_handle_query` now accepts `user_id`, `messages`, `language` params and stores thread state after every query response
+- Clarify handler carries forward `site_id`/`ticket_id` from existing state into clarify state data
+- Multi-turn merge treats `query` and `clarify` as transparent — inherits identifiers instead of clearing state
+- System prompt: added `ticket_detail` query type with `ticket_id` extraction instruction
+
 ## Session 3 — Cloud Run Deploy + End-to-End Testing (2026-02-10/11)
 
 ### Added

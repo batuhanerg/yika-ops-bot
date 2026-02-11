@@ -150,6 +150,14 @@ def process_message(
     if result.operation == "clarify":
         clarify_msg = result.data.get("message", "")
         if clarify_msg:
+            # Carry forward identifiers from existing state so they survive the clarify round-trip
+            context_data: dict[str, Any] = {}
+            if existing_state:
+                prev_data = existing_state.get("data", {})
+                for key in ("site_id", "ticket_id"):
+                    if prev_data.get(key):
+                        context_data[key] = prev_data[key]
+
             # Store thread state so the user's reply continues the conversation
             messages = thread_context or []
             messages.append({"role": "user", "content": f"[Sender: {sender_name}]\n{text}"})
@@ -157,7 +165,7 @@ def process_message(
             thread_store.set(thread_ts, {
                 "operation": "clarify",
                 "user_id": user_id,
-                "data": {},
+                "data": context_data,
                 "missing_fields": [],
                 "messages": messages,
                 "language": result.language,
@@ -171,8 +179,12 @@ def process_message(
         return
 
     # Handle query (read-only, no confirmation needed)
-    if result.operation == "query" and not existing_state:
-        _handle_query(result.data, thread_ts, say)
+    if result.operation == "query":
+        # Build conversation history for query context
+        q_messages = thread_context or []
+        q_messages.append({"role": "user", "content": f"[Sender: {sender_name}]\n{text}"})
+        q_messages.append({"role": "assistant", "content": json.dumps({"operation": "query", "data": result.data}, ensure_ascii=False)})
+        _handle_query(result.data, thread_ts, say, user_id, q_messages, result.language)
         return
 
     # Multi-turn data merge: only when refining the SAME operation
@@ -180,7 +192,12 @@ def process_message(
         original_op = existing_state["operation"]
         original_data = existing_state.get("data", {})
 
-        if result.operation == original_op:
+        # Query/clarify → write: inherit identifiers (site_id, ticket_id), don't merge data
+        if original_op in ("query", "clarify"):
+            for key in ("site_id", "ticket_id"):
+                if original_data.get(key) and not result.data.get(key):
+                    result.data[key] = original_data[key]
+        elif result.operation == original_op:
             # Same operation — merge previous data with new fields
             merged = {**original_data}
             for k, v in result.data.items():
@@ -401,11 +418,30 @@ def _show_confirmation(
     say(blocks=blocks, thread_ts=thread_ts)
 
 
-def _handle_query(data: dict[str, Any], thread_ts: str, say) -> None:
+def _handle_query(
+    data: dict[str, Any],
+    thread_ts: str,
+    say,
+    user_id: str = "",
+    messages: list[dict] | None = None,
+    language: str = "tr",
+) -> None:
     """Handle read-only queries."""
     query_type = data.get("query_type", "site_summary")
     site_id = data.get("site_id")
     sheets = get_sheets()
+
+    def _store_query_state() -> None:
+        """Store thread state so follow-up queries work."""
+        if user_id:
+            thread_store.set(thread_ts, {
+                "operation": "query",
+                "user_id": user_id,
+                "data": data,
+                "missing_fields": [],
+                "messages": messages or [],
+                "language": language,
+            })
 
     try:
         if query_type in ("site_summary", "site_status"):
@@ -441,6 +477,7 @@ def _handle_query(data: dict[str, Any], thread_ts: str, say) -> None:
             open_entries = [s for s in support if s.get("Status") not in ("Resolved",)]
             if not open_entries:
                 say(text="Açık ticket bulunamadı.", thread_ts=thread_ts)
+                _store_query_state()
                 return
             lines = []
             for entry in open_entries:
@@ -451,14 +488,96 @@ def _handle_query(data: dict[str, Any], thread_ts: str, say) -> None:
             stock = sheets.read_stock()
             if not stock:
                 say(text="Stok bilgisi bulunamadı.", thread_ts=thread_ts)
+                _store_query_state()
                 return
             lines = []
             for item in stock:
                 lines.append(f"• {item['Device Type']} x{item['Qty']} ({item.get('Condition', '')}) — {item.get('Location', '')}")
             say(text=f"*Stok Durumu:*\n" + "\n".join(lines), thread_ts=thread_ts)
 
+        elif query_type == "implementation":
+            if not site_id:
+                say(text="Hangi sitenin kurulum detaylarını görmek istiyorsunuz?", thread_ts=thread_ts)
+                return
+            impl = sheets.read_implementation(site_id)
+            if not impl:
+                say(text=f"`{site_id}` için kurulum detayı bulunamadı.", thread_ts=thread_ts)
+                _store_query_state()
+                return
+            lines = [f"*⚙️ `{site_id}` — Kurulum Detayları:*"]
+            for key, value in impl.items():
+                if key == "Site ID" or not value:
+                    continue
+                lines.append(f"• *{key}:* {value}")
+            say(text="\n".join(lines), thread_ts=thread_ts)
+
+        elif query_type == "hardware":
+            if not site_id:
+                say(text="Hangi sitenin donanım envanterini görmek istiyorsunuz?", thread_ts=thread_ts)
+                return
+            hw = sheets.read_hardware(site_id)
+            if not hw:
+                say(text=f"`{site_id}` için donanım kaydı bulunamadı.", thread_ts=thread_ts)
+                _store_query_state()
+                return
+            lines = [f"*🔧 `{site_id}` — Donanım Envanteri:*"]
+            for item in hw:
+                parts = [f"{item.get('Device Type', '?')} x{item.get('Qty', '?')}"]
+                if item.get("HW Version"):
+                    parts.append(f"HW:{item['HW Version']}")
+                if item.get("FW Version"):
+                    parts.append(f"FW:{item['FW Version']}")
+                if item.get("Notes"):
+                    parts.append(f"({item['Notes']})")
+                lines.append(f"• {' '.join(parts)}")
+            total = sum(int(h.get("Qty", 0)) for h in hw)
+            lines.append(f"_Toplam: {total} cihaz_")
+            say(text="\n".join(lines), thread_ts=thread_ts)
+
+        elif query_type == "support_history":
+            if not site_id:
+                say(text="Hangi sitenin destek geçmişini görmek istiyorsunuz?", thread_ts=thread_ts)
+                return
+            support = sheets.read_support_log(site_id)
+            if not support:
+                say(text=f"`{site_id}` için destek kaydı bulunamadı.", thread_ts=thread_ts)
+                _store_query_state()
+                return
+            lines = [f"*📋 `{site_id}` — Destek Geçmişi ({len(support)} kayıt):*"]
+            for entry in support[-10:]:  # Last 10 entries
+                status_icon = "✅" if entry.get("Status") == "Resolved" else "🔴"
+                tid = entry.get("Ticket ID", "")
+                date = entry.get("Received Date", "")
+                summary = entry.get("Issue Summary", "")[:60]
+                lines.append(f"• {status_icon} `{tid}` ({date}) — {summary}")
+            if len(support) > 10:
+                lines.append(f"_...ve {len(support) - 10} kayıt daha_")
+            say(text="\n".join(lines), thread_ts=thread_ts)
+
+        elif query_type == "ticket_detail":
+            ticket_id = data.get("ticket_id", "")
+            if not ticket_id:
+                say(text="Hangi ticket'ın detaylarını görmek istiyorsunuz? (örn. SUP-001)", thread_ts=thread_ts)
+                return
+            # Search all support logs for the ticket
+            all_support = sheets.read_support_log(site_id) if site_id else sheets.read_support_log()
+            entry = next((s for s in all_support if s.get("Ticket ID") == ticket_id), None)
+            if not entry:
+                say(text=f"`{ticket_id}` bulunamadı.", thread_ts=thread_ts)
+                _store_query_state()
+                return
+            status_icon = "✅" if entry.get("Status") == "Resolved" else "🔴"
+            lines = [f"*{status_icon} `{ticket_id}` — Ticket Detayı:*"]
+            for key, value in entry.items():
+                if not value:
+                    continue
+                lines.append(f"• *{key}:* {value}")
+            say(text="\n".join(lines), thread_ts=thread_ts)
+
         else:
             say(text=f"Bu sorgu türü henüz desteklenmiyor: {query_type}", thread_ts=thread_ts)
+
+        _store_query_state()
 
     except Exception as e:
         logger.exception("Query error")
