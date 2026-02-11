@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.5.0 — Create-Site Wizard, Data Quality, and UX Polish (2026-02-11)
+
+### Added
+- **Proactive chain wizard after create_site** — every new site now prompts for hardware and implementation details (with skip option), even if not mentioned in the original message
+- **Empty chain step prompt** — when a chain step has no pre-filled data, shows "write your data or skip" with ⏭️ Atla button instead of an empty confirmation card
+- **Explicit feedback via text** — users can type `feedback: ...` or `geri bildirim: ...` to log feedback directly to the Feedback sheet
+- **Visible feedback confirmation** — clicking 👍 now shows "Teşekkürler, geri bildiriminiz kaydedildi!" with a closing message
+- **Data quality: missing hardware/implementation** — `missing_data` query now flags sites with zero hardware or implementation records
+- **Address in data quality checks** — missing Address is now flagged in the missing data report
+
+### Fixed
+- **Phone number formula parse error** — phone numbers starting with `+` (e.g., `+90...`) no longer cause `#ERROR!` in Google Sheets; all cell values are sanitized against formula injection (`+`, `=`, `@` prefixed with `'`)
+- **Thread dies after feedback** — after 👍/👎 + closing message, thread is properly cleared with guidance to start a new thread
+- **Chain context lost in follow-ups** — chain state (pending operations, step numbers, completed/skipped tracking) now survives through missing_fields prompts and multi-turn follow-ups in `process_message`
+
+### Changed
+- `_normalize_create_site_data` always injects `update_hardware` and `update_implementation` as pending chain steps
+- `_show_confirmation` accepts optional `chain_state` parameter for continuing existing chains
+- `process_message` preserves chain context from existing thread state and passes it through to confirmation
+- `_sanitize_cell()` applied to all `append_row` calls in sheets.py
+- Post-feedback messages now include thread closure guidance
+
 ## v1.4.0 — Hotfix: Multi-turn Flow, Feedback, and Cancel (2026-02-11)
 
 ### Fixed

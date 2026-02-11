@@ -110,6 +110,32 @@ def process_message(
         )
         return
 
+    # Handle explicit feedback messages (e.g., "@mustafa feedback: ..." or "@mustafa geri bildirim: ...")
+    text_lower = text.lower().strip()
+    if text_lower.startswith(("feedback:", "feedback ", "geri bildirim:", "geri bildirim ")):
+        # Strip the prefix to get the actual feedback text
+        for prefix in ("feedback:", "feedback ", "geri bildirim:", "geri bildirim "):
+            if text_lower.startswith(prefix):
+                feedback_text = text[len(prefix):].strip()
+                break
+        sender_name = _resolve_user_name(client, user_id)
+        try:
+            sheets = get_sheets()
+            sheets.append_feedback(
+                user=sender_name,
+                operation="explicit",
+                site_id="",
+                ticket_id="",
+                rating="comment",
+                expected_behavior=feedback_text,
+                original_message=text,
+            )
+            say(text="Teşekkürler, geri bildiriminiz kaydedildi!", thread_ts=thread_ts)
+        except Exception:
+            logger.exception("Explicit feedback write error")
+            say(text="Geri bildirim kaydedilemedi, lütfen tekrar deneyin.", thread_ts=thread_ts)
+        return
+
     sender_name = _resolve_user_name(client, user_id)
 
     # Check for existing thread state (multi-turn)
@@ -305,14 +331,22 @@ def process_message(
 
     # Check for missing fields
     if result.missing_fields:
-        thread_store.set(thread_ts, {
+        missing_state: dict[str, Any] = {
             "operation": result.operation,
             "user_id": user_id,
             "data": result.data,
             "missing_fields": result.missing_fields,
             "messages": messages,
             "language": result.language,
-        })
+        }
+        # Preserve chain context if present
+        if existing_state:
+            for key in ("chain_steps", "current_step", "total_steps",
+                        "completed_operations", "skipped_operations",
+                        "pending_operations", "raw_message", "sender_name"):
+                if key in existing_state:
+                    missing_state[key] = existing_state[key]
+        thread_store.set(thread_ts, missing_state)
 
         # Build missing fields message
         field_names = ", ".join(f"`{f}`" for f in result.missing_fields)
@@ -372,8 +406,21 @@ def process_message(
             except Exception:
                 pass  # Don't block on sheet read errors
 
+    # Preserve chain context from existing thread state
+    chain_ctx = None
+    if existing_state and existing_state.get("chain_steps"):
+        chain_ctx = {
+            "chain_steps": existing_state["chain_steps"],
+            "current_step": existing_state.get("current_step", 1),
+            "total_steps": existing_state.get("total_steps", 1),
+            "completed_operations": existing_state.get("completed_operations", []),
+            "skipped_operations": existing_state.get("skipped_operations", []),
+        }
+        if not pending_ops and existing_state.get("pending_operations"):
+            pending_ops = existing_state["pending_operations"]
+
     # All fields present — show confirmation
-    _show_confirmation(result.operation, result.data, user_id, thread_ts, say, text, sender_name, messages, result.language, pending_ops)
+    _show_confirmation(result.operation, result.data, user_id, thread_ts, say, text, sender_name, messages, result.language, pending_ops, chain_ctx)
 
 
 def _show_confirmation(
@@ -387,16 +434,21 @@ def _show_confirmation(
     messages: list[dict] | None = None,
     language: str = "tr",
     pending_operations: list[dict] | None = None,
+    chain_state: dict[str, Any] | None = None,
 ) -> None:
     """Show formatted confirmation with buttons and store state."""
     step_info = None
-    chain_state: dict[str, Any] = {}
+    cs: dict[str, Any] = {}
 
-    if pending_operations:
+    if chain_state:
+        # Continuing an existing chain
+        cs = {**chain_state}
+        step_info = (cs.get("current_step", 1), cs.get("total_steps", 1))
+    elif pending_operations:
         chain_steps = [operation] + [op["operation"] for op in pending_operations]
         total = len(chain_steps)
         step_info = (1, total)
-        chain_state = {
+        cs = {
             "chain_steps": chain_steps,
             "current_step": 1,
             "total_steps": total,
@@ -422,7 +474,7 @@ def _show_confirmation(
     }
     if pending_operations:
         state["pending_operations"] = pending_operations
-    state.update(chain_state)
+    state.update(cs)
 
     thread_store.set(thread_ts, state)
 
@@ -589,7 +641,8 @@ def _handle_query(
             sites = sheets.read_sites()
             hardware = sheets.read_hardware(site_id) if site_id else sheets.read_hardware()
             support = sheets.read_support_log(site_id) if site_id else sheets.read_support_log()
-            issues = find_missing_data(sites=sites, hardware=hardware, support=support, site_id=site_id)
+            implementation = sheets.read_all_implementation()
+            issues = find_missing_data(sites=sites, hardware=hardware, support=support, site_id=site_id, implementation=implementation)
             blocks = format_data_quality_response("missing_data", issues, site_id)
             say(blocks=blocks, thread_ts=thread_ts)
 
@@ -689,4 +742,9 @@ def _normalize_create_site_data(data: dict[str, Any]) -> list[dict] | None:
         if key not in _VALID_SITE_KEYS:
             data.pop(key)
 
-    return extra_ops if extra_ops else None
+    # Always include hardware and implementation in the chain for completeness
+    if not any(op["operation"] == "update_hardware" for op in extra_ops):
+        extra_ops.append({"operation": "update_hardware", "data": {}})
+    if not any(op["operation"] == "update_implementation" for op in extra_ops):
+        extra_ops.append({"operation": "update_implementation", "data": {}})
+    return extra_ops

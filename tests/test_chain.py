@@ -68,10 +68,13 @@ class TestNormalizeCreateSiteData:
         }
         extras = _normalize_create_site_data(data)
         assert extras is not None
-        assert len(extras) == 1
-        assert extras[0]["operation"] == "update_hardware"
-        assert len(extras[0]["data"]["entries"]) == 2
+        hw_ops = [e for e in extras if e["operation"] == "update_hardware"]
+        assert len(hw_ops) == 1
+        assert len(hw_ops[0]["data"]["entries"]) == 2
         assert "hardware" not in data
+        # Implementation is always included in chain
+        impl_ops = [e for e in extras if e["operation"] == "update_implementation"]
+        assert len(impl_ops) == 1
 
     def test_extracts_implementation_from_data(self):
         data = {
@@ -85,10 +88,13 @@ class TestNormalizeCreateSiteData:
         }
         extras = _normalize_create_site_data(data)
         assert extras is not None
-        assert len(extras) == 1
-        assert extras[0]["operation"] == "update_implementation"
-        assert extras[0]["data"]["Internet connection"] == "Customer WiFi"
+        impl_ops = [e for e in extras if e["operation"] == "update_implementation"]
+        assert len(impl_ops) == 1
+        assert impl_ops[0]["data"]["Internet connection"] == "Customer WiFi"
         assert "implementation" not in data
+        # Hardware is always included in chain
+        hw_ops = [e for e in extras if e["operation"] == "update_hardware"]
+        assert len(hw_ops) == 1
 
     def test_extracts_support_log_from_data(self):
         data = {
@@ -100,12 +106,15 @@ class TestNormalizeCreateSiteData:
         }
         extras = _normalize_create_site_data(data)
         assert extras is not None
-        assert len(extras) == 1
-        assert extras[0]["operation"] == "log_support"
-        assert extras[0]["data"]["received_date"] == "2025-02-03"
-        assert extras[0]["data"]["issue_summary"] == "Battery optimization"
+        support_ops = [e for e in extras if e["operation"] == "log_support"]
+        assert len(support_ops) == 1
+        assert support_ops[0]["data"]["received_date"] == "2025-02-03"
+        assert support_ops[0]["data"]["issue_summary"] == "Battery optimization"
         assert "last_visit_date" not in data
         assert "last_visit_notes" not in data
+        # Hardware and implementation always included
+        assert any(e["operation"] == "update_hardware" for e in extras)
+        assert any(e["operation"] == "update_implementation" for e in extras)
 
     def test_extracts_all_extras_ordered(self):
         data = {
@@ -118,10 +127,9 @@ class TestNormalizeCreateSiteData:
         }
         extras = _normalize_create_site_data(data)
         assert extras is not None
-        assert len(extras) == 3
-        assert extras[0]["operation"] == "update_hardware"
-        assert extras[1]["operation"] == "update_implementation"
-        assert extras[2]["operation"] == "log_support"
+        # All three explicitly extracted, no duplicates added
+        ops = [e["operation"] for e in extras]
+        assert ops == ["update_hardware", "update_implementation", "log_support"]
 
     def test_strips_non_site_keys(self):
         data = {
@@ -135,14 +143,22 @@ class TestNormalizeCreateSiteData:
         assert "site_id" in data
         assert "customer" in data
 
-    def test_returns_none_when_no_extras(self):
+    def test_always_includes_hw_and_impl_when_no_extras(self):
         data = {
             "site_id": "ASM-TR-01",
             "customer": "Test",
             "country": "Turkey",
         }
         extras = _normalize_create_site_data(data)
-        assert extras is None
+        assert extras is not None
+        ops = [e["operation"] for e in extras]
+        assert "update_hardware" in ops
+        assert "update_implementation" in ops
+        # Empty data for auto-added steps
+        hw = next(e for e in extras if e["operation"] == "update_hardware")
+        assert hw["data"] == {}
+        impl = next(e for e in extras if e["operation"] == "update_implementation")
+        assert impl["data"] == {}
 
 
 class TestChainRoadmap:

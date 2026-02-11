@@ -46,7 +46,7 @@ def register(app: App) -> None:
                         expected_behavior=text,
                         original_message=state.get("raw_message", ""),
                     )
-                    say(text="Teşekkürler, geri bildiriminiz kaydedildi.", thread_ts=thread_ts)
+                    say(text="Teşekkürler, geri bildiriminiz kaydedildi. İşlem tamamlandı — yeni konu için yeni bir thread başlatın.", thread_ts=thread_ts)
                 except Exception:
                     logger.exception("Feedback write error")
                     say(text="Geri bildirim kaydedilemedi, lütfen tekrar deneyin.", thread_ts=thread_ts)

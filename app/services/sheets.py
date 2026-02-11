@@ -91,6 +91,13 @@ _SITES_KEY_MAP = {
 }
 
 
+def _sanitize_cell(value: Any) -> Any:
+    """Prevent formula injection: prefix values starting with + = @ with apostrophe."""
+    if isinstance(value, str) and value and value[0] in ("+", "=", "@"):
+        return "'" + value
+    return value
+
+
 class SheetsService:
     """Read/write operations against the ERG Controls Google Sheet."""
 
@@ -123,6 +130,7 @@ class SheetsService:
             # Find the snake_case key for this column
             key = next((k for k, v in _SITES_KEY_MAP.items() if v == col), None)
             mapped_row.append(data.get(key, "") if key else "")
+        mapped_row = [_sanitize_cell(v) for v in mapped_row]
         self._ws("Sites").append_row(mapped_row, value_input_option="USER_ENTERED")
 
     def update_site(self, site_id: str, updates: dict[str, Any]) -> None:
@@ -150,6 +158,7 @@ class SheetsService:
         for col in HARDWARE_COLUMNS:
             key = next((k for k, v in _HARDWARE_KEY_MAP.items() if v == col), None)
             row.append(data.get(key, "") if key else "")
+        row = [_sanitize_cell(v) for v in row]
         self._ws("Hardware Inventory").append_row(row, value_input_option="USER_ENTERED")
 
     # --- Implementation Details ---
@@ -242,6 +251,7 @@ class SheetsService:
             if isinstance(val, list):
                 val = ", ".join(str(v) for v in val)
             row.append(val)
+        row = [_sanitize_cell(v) for v in row]
         self._ws("Support Log").append_row(row, value_input_option="USER_ENTERED")
         return ticket_id
 
@@ -322,6 +332,7 @@ class SheetsService:
         for col in STOCK_COLUMNS:
             key = col.lower().replace(" ", "_").replace("-", "_")
             row.append(data.get(key, ""))
+        row = [_sanitize_cell(v) for v in row]
         self._ws("Stock").append_row(row, value_input_option="USER_ENTERED")
 
     def update_stock(self, row_index: int, updates: dict[str, Any]) -> None:
@@ -344,7 +355,7 @@ class SheetsService:
         raw_message: str,
     ) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
-        row = [timestamp, user, operation, target_tab, site_id, summary, raw_message]
+        row = [_sanitize_cell(v) for v in [timestamp, user, operation, target_tab, site_id, summary, raw_message]]
         self._ws("Audit Log").append_row(row, value_input_option="USER_ENTERED")
 
     # --- Feedback ---
@@ -360,5 +371,5 @@ class SheetsService:
         original_message: str,
     ) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
-        row = [timestamp, user, operation, site_id, ticket_id, rating, expected_behavior, original_message]
+        row = [_sanitize_cell(v) for v in [timestamp, user, operation, site_id, ticket_id, rating, expected_behavior, original_message]]
         self._ws("Feedback").append_row(row, value_input_option="USER_ENTERED")

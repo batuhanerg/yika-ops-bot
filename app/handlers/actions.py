@@ -10,6 +10,7 @@ from app.handlers.common import get_sheets, thread_store
 from app.services.sheets import SheetsService
 from app.utils.formatters import (
     build_chain_final_summary,
+    format_chain_input_prompt,
     format_confirmation_message,
     format_feedback_buttons,
     OPERATION_TITLES,
@@ -109,12 +110,8 @@ def register(app: App) -> None:
                 if readback:
                     say(text=f"✅ {readback}", thread_ts=thread_ts, channel=channel)
 
-                # Show next confirmation card with step indicator
-                step_info = (next_step, total_steps)
-                display_data = {**next_data, "operation": next_op["operation"]}
-                blocks = format_confirmation_message(display_data, step_info=step_info)
-
-                thread_store.set(thread_ts, {
+                # Build chain state for storage
+                chain_thread_state = {
                     "operation": next_op["operation"],
                     "user_id": user_id,
                     "data": next_data,
@@ -128,8 +125,22 @@ def register(app: App) -> None:
                     "current_step": next_step,
                     "total_steps": total_steps,
                     "language": state.get("language", "tr"),
-                })
-                say(blocks=blocks, thread_ts=thread_ts, channel=channel)
+                }
+
+                # Check if next step has actual data or needs user input
+                has_data = any(v for k, v in next_data.items() if k != "site_id")
+                if has_data:
+                    step_info = (next_step, total_steps)
+                    display_data = {**next_data, "operation": next_op["operation"]}
+                    blocks = format_confirmation_message(display_data, step_info=step_info)
+                    thread_store.set(thread_ts, chain_thread_state)
+                    say(blocks=blocks, thread_ts=thread_ts, channel=channel)
+                else:
+                    # Empty step — prompt user for data with skip option
+                    chain_thread_state["awaiting_chain_input"] = True
+                    thread_store.set(thread_ts, chain_thread_state)
+                    blocks = format_chain_input_prompt(next_step, total_steps, next_op["operation"])
+                    say(text=f"Adım {next_step}/{total_steps}", blocks=blocks, thread_ts=thread_ts, channel=channel)
             else:
                 # No more pending — finalize
                 in_chain = bool(chain_steps) and len(chain_steps) > 1
@@ -231,11 +242,7 @@ def register(app: App) -> None:
 
             say(text="⏭️ Atlandı.", thread_ts=thread_ts, channel=channel)
 
-            step_info = (next_step, total_steps)
-            display_data = {**next_data, "operation": next_op["operation"]}
-            blocks = format_confirmation_message(display_data, step_info=step_info)
-
-            thread_store.set(thread_ts, {
+            chain_thread_state = {
                 "operation": next_op["operation"],
                 "user_id": user_id,
                 "data": next_data,
@@ -249,8 +256,20 @@ def register(app: App) -> None:
                 "current_step": next_step,
                 "total_steps": total_steps,
                 "language": lang,
-            })
-            say(blocks=blocks, thread_ts=thread_ts, channel=channel)
+            }
+
+            has_data = any(v for k, v in next_data.items() if k != "site_id")
+            if has_data:
+                step_info = (next_step, total_steps)
+                display_data = {**next_data, "operation": next_op["operation"]}
+                blocks = format_confirmation_message(display_data, step_info=step_info)
+                thread_store.set(thread_ts, chain_thread_state)
+                say(blocks=blocks, thread_ts=thread_ts, channel=channel)
+            else:
+                chain_thread_state["awaiting_chain_input"] = True
+                thread_store.set(thread_ts, chain_thread_state)
+                blocks = format_chain_input_prompt(next_step, total_steps, next_op["operation"])
+                say(text=f"Adım {next_step}/{total_steps}", blocks=blocks, thread_ts=thread_ts, channel=channel)
         else:
             in_chain = bool(chain_steps) and len(chain_steps) > 1
             if in_chain and completed:
@@ -299,6 +318,11 @@ def register(app: App) -> None:
         except Exception:
             logger.exception("Feedback write error")
 
+        say(
+            text="Teşekkürler, geri bildiriminiz kaydedildi! İşlem tamamlandı — yeni konu için yeni bir thread başlatın.",
+            thread_ts=thread_ts,
+            channel=channel,
+        )
         thread_store.clear(thread_ts)
 
     @app.action("feedback_negative")

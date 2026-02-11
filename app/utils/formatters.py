@@ -395,6 +395,31 @@ def format_data_quality_response(
     return blocks
 
 
+def format_chain_input_prompt(step: int, total: int, operation: str) -> list[dict]:
+    """Format a prompt for an empty chain step, asking user for data or to skip."""
+    label = CHAIN_LABELS.get(operation, operation).capitalize()
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"📝 *Adım {step}/{total} — {label}*\nBilgileri bu thread'e yazın veya atlayın.",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "⏭️ Atla"},
+                    "action_id": "cancel_action",
+                    "value": "cancel",
+                },
+            ],
+        },
+    ]
+
+
 def build_chain_roadmap(chain_steps: list[str]) -> str:
     """Build a roadmap message for a chained create_site wizard."""
     _EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"]

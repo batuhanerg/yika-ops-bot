@@ -63,7 +63,8 @@ class TestMissingData:
     def test_no_issues_when_complete(self):
         sites = [
             {"Site ID": "MIG-TR-01", "Customer": "Migros", "Email 1": "a@b.com",
-             "Supervisor 2": "John", "Phone 2": "123", "Email 2": "j@b.com"},
+             "Supervisor 2": "John", "Phone 2": "123", "Email 2": "j@b.com",
+             "Address": "Istanbul, Kadıköy"},
         ]
         hardware = [
             {"Site ID": "MIG-TR-01", "Device Type": "Tag", "Qty": 20, "FW Version": "2.4.1", "HW Version": "1.0"},
@@ -72,7 +73,9 @@ class TestMissingData:
             {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-001", "Status": "Resolved",
              "Root Cause": "FW Bug", "Resolution": "Fixed"},
         ]
-        result = find_missing_data(sites=sites, hardware=hardware, support=support, site_id="MIG-TR-01")
+        implementation = [{"Site ID": "MIG-TR-01", "Last Verified": "2025-01-01"}]
+        result = find_missing_data(sites=sites, hardware=hardware, support=support,
+                                   site_id="MIG-TR-01", implementation=implementation)
         assert len(result) == 0
 
     def test_all_sites_scan(self):
@@ -193,6 +196,7 @@ class TestDataQualityQueryWiring:
         ]
         mock_sheets.read_hardware.return_value = []
         mock_sheets.read_support_log.return_value = []
+        mock_sheets.read_all_implementation.return_value = []
         mock_get_sheets.return_value = mock_sheets
 
         say = MagicMock()

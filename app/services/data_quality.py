@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from typing import Any
 
 # Fields to check on Sites tab
-_SITE_IMPORTANT_FIELDS = ["Email 1", "Supervisor 2"]
+_SITE_IMPORTANT_FIELDS = ["Email 1", "Supervisor 2", "Address"]
 
 # Fields to check on Hardware Inventory tab
 _HARDWARE_IMPORTANT_FIELDS = ["FW Version"]
@@ -17,6 +17,7 @@ def find_missing_data(
     hardware: list[dict[str, Any]],
     support: list[dict[str, Any]],
     site_id: str | None = None,
+    implementation: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Scan across tabs for empty or incomplete fields.
 
@@ -77,6 +78,31 @@ def find_missing_data(
                 "field": "Resolution",
                 "detail": f"{ticket}: Resolved ama Resolution boş",
             })
+
+    # Check for sites with no hardware records
+    hw_sites = {h["Site ID"] for h in hardware}
+    for site in filtered_sites:
+        sid = site["Site ID"]
+        if sid not in hw_sites:
+            issues.append({
+                "site_id": sid,
+                "tab": "Hardware Inventory",
+                "field": "—",
+                "detail": "Donanım kaydı yok",
+            })
+
+    # Check for sites with no implementation records
+    if implementation is not None:
+        impl_sites = {i.get("Site ID") for i in implementation if i.get("Site ID")}
+        for site in filtered_sites:
+            sid = site["Site ID"]
+            if sid not in impl_sites:
+                issues.append({
+                    "site_id": sid,
+                    "tab": "Implementation Details",
+                    "field": "—",
+                    "detail": "Kurulum detayı yok",
+                })
 
     return issues
 
