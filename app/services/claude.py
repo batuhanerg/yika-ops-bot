@@ -27,19 +27,17 @@ class ClaudeService:
     def __init__(self, api_key: str | None = None) -> None:
         key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self.client = anthropic.Anthropic(api_key=key)
-        self._system_prompt = self._build_system_prompt()
-
-    def _build_system_prompt(self) -> str:
-        parts = [
+        # Cache the static parts of the prompt (everything except today's date)
+        self._static_prompt = "\n".join([
             _load_prompt("system_prompt.md"),
             "\n---\n",
             _load_prompt("vocabulary.md"),
             "\n---\n",
             _load_prompt("team_context.md"),
-            "\n---\n",
-            f"Today's date: {date.today().isoformat()}",
-        ]
-        return "\n".join(parts)
+        ])
+
+    def _build_system_prompt(self) -> str:
+        return f"{self._static_prompt}\n---\nToday's date: {date.today().isoformat()}"
 
     def parse_message(
         self,
@@ -59,7 +57,7 @@ class ClaudeService:
         response = self.client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=self._system_prompt,
+            system=self._build_system_prompt(),
             messages=messages,
         )
 

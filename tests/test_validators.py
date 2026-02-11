@@ -119,9 +119,33 @@ class TestRequiredFields:
         missing = validate_required_fields("log_support", data)
         assert "received_date" in missing
         assert "status" in missing
-        assert "root_cause" in missing
         assert "issue_summary" in missing
         assert "technician" in missing
+        # root_cause is NOT in base required fields — it's conditional on status
+
+    def test_support_log_open_no_root_cause_required(self):
+        data = {
+            "site_id": "ASM-TR-01",
+            "received_date": "2025-01-15",
+            "type": "Call",
+            "status": "Open",
+            "issue_summary": "Tag data issue",
+            "technician": "Batu",
+        }
+        missing = validate_required_fields("log_support", data)
+        assert missing == []  # root_cause not required for Open
+
+    def test_support_log_non_open_requires_root_cause(self):
+        data = {
+            "site_id": "ASM-TR-01",
+            "received_date": "2025-01-15",
+            "type": "Visit",
+            "status": "Follow-up (ERG)",
+            "issue_summary": "Tag replacement",
+            "technician": "Gökhan",
+        }
+        missing = validate_required_fields("log_support", data)
+        assert "root_cause" in missing
 
     def test_support_log_resolved_requires_resolution(self):
         data = {
@@ -129,14 +153,14 @@ class TestRequiredFields:
             "received_date": "2025-01-15",
             "type": "Visit",
             "status": "Resolved",
-            "root_cause": "HW Fault (Production)",
             "issue_summary": "Tag replacement",
             "technician": "Gökhan",
             "resolved_date": "2025-01-15",
-            # resolution missing
+            # resolution and root_cause missing
         }
         missing = validate_required_fields("log_support", data)
         assert "resolution" in missing
+        assert "root_cause" in missing
 
     def test_create_site_missing_fields(self):
         data = {"customer": "Test Corp"}

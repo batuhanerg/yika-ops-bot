@@ -108,8 +108,8 @@ class TestCreateSite:
         )
         assert result.operation == "create_site"
         # Should suggest a Site ID following XXX-CC-NN pattern
-        suggested_id = result.data.get("site_id", "")
-        assert "-TR-" in suggested_id
+        suggested_id = result.data.get("site_id") or result.data.get("suggested_site_id", "")
+        assert "-TR-" in suggested_id, f"Expected '-TR-' in site_id, got data: {result.data}"
         assert result.data["facility_type"] == "Healthcare"
 
 

@@ -17,6 +17,7 @@ ROOT_CAUSES = (
     "Feature Request",
     "Configuration",
     "User Error",
+    "Pending",
     "Other",
 )
 FACILITY_TYPES = ("Food", "Healthcare")
@@ -57,7 +58,6 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
         "received_date",
         "type",
         "status",
-        "root_cause",
         "issue_summary",
         "technician",
     ],
@@ -92,10 +92,13 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     ],
 }
 
-# Conditional required fields: if status == "Resolved", also need these
+# Conditional required fields based on status
 CONDITIONAL_REQUIRED: dict[str, dict[str, list[str]]] = {
     "log_support": {
-        "Resolved": ["resolved_date", "resolution"],
+        "Resolved": ["resolved_date", "resolution", "root_cause"],
+        "Follow-up (ERG)": ["root_cause"],
+        "Follow-up (Customer)": ["root_cause"],
+        "Scheduled": ["root_cause"],
     },
 }
 
