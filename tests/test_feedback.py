@@ -124,6 +124,233 @@ class TestFeedbackSheetWrite:
         assert "32 olmalıydı" in row[6]
 
 
+class TestFeedbackAfterQuery:
+    """Item 3: Feedback buttons should appear after query responses too."""
+
+    def test_format_feedback_buttons_default_question(self):
+        """Default question is write-oriented."""
+        blocks = format_feedback_buttons()
+        text = _blocks_to_text(blocks)
+        assert "Doğru kaydedildi mi?" in text
+
+    def test_format_feedback_buttons_query_question(self):
+        """Query context uses a different question."""
+        blocks = format_feedback_buttons(context="query")
+        text = _blocks_to_text(blocks)
+        assert "Faydalı oldu mu?" in text
+
+    def test_query_sends_feedback_buttons(self):
+        """After a query response, feedback buttons should be sent."""
+        from app.handlers.common import _handle_query, thread_store
+
+        say = MagicMock()
+        _handle_query(
+            {"query_type": "stock"},
+            thread_ts="T_Q_001",
+            say=say,
+            user_id="U123",
+            language="tr",
+        )
+        # At least one call should include feedback buttons
+        all_calls = say.call_args_list
+        feedback_call = None
+        for call in all_calls:
+            blocks = call.kwargs.get("blocks") or (call.args[0] if call.args else None)
+            if blocks and isinstance(blocks, list):
+                for block in blocks:
+                    if block.get("type") == "actions":
+                        elements = block.get("elements", [])
+                        action_ids = [e.get("action_id") for e in elements]
+                        if "feedback_positive" in action_ids:
+                            feedback_call = call
+                            break
+        assert feedback_call is not None, "No feedback buttons sent after query"
+        thread_store.clear("T_Q_001")
+
+    def test_query_feedback_state_has_pending(self):
+        """After query + feedback, thread state should have feedback_pending."""
+        from app.handlers.common import _handle_query, thread_store
+
+        say = MagicMock()
+        _handle_query(
+            {"query_type": "stock"},
+            thread_ts="T_Q_002",
+            say=say,
+            user_id="U123",
+            language="tr",
+        )
+        state = thread_store.get("T_Q_002")
+        assert state is not None
+        assert state.get("feedback_pending") is True
+        thread_store.clear("T_Q_002")
+
+    def test_query_feedback_state_has_operation(self):
+        """Query feedback state should record operation as 'query'."""
+        from app.handlers.common import _handle_query, thread_store
+
+        say = MagicMock()
+        _handle_query(
+            {"query_type": "stock"},
+            thread_ts="T_Q_003",
+            say=say,
+            user_id="U123",
+            language="tr",
+        )
+        state = thread_store.get("T_Q_003")
+        assert state is not None
+        assert state.get("operation") == "query"
+        thread_store.clear("T_Q_003")
+
+
+class TestFeedbackAfterCancel:
+    """Feedback buttons should appear after cancel/skip ends an interaction."""
+
+    def test_single_cancel_sends_feedback(self):
+        """After cancelling a single operation, feedback buttons should be sent."""
+        from app.handlers.common import thread_store
+
+        thread_store.set("ts_cancel_001", {
+            "operation": "log_support",
+            "user_id": "U_CANCEL",
+            "data": {"site_id": "MIG-TR-01"},
+            "raw_message": "test",
+            "sender_name": "Batu",
+            "language": "tr",
+        })
+
+        say = MagicMock()
+        body = {
+            "message": {"thread_ts": "ts_cancel_001"},
+            "user": {"id": "U_CANCEL"},
+            "channel": {"id": "C001"},
+        }
+
+        # Simulate cancel action
+        from app.handlers.actions import register
+        from unittest.mock import MagicMock as MM
+        app_mock = MM()
+        handlers = {}
+
+        def capture_action(action_id):
+            def decorator(fn):
+                handlers[action_id] = fn
+                return fn
+            return decorator
+
+        app_mock.action = capture_action
+        register(app_mock)
+
+        handlers["cancel_action"](lambda: None, body, say)
+
+        # Find feedback buttons in say calls
+        feedback_found = False
+        for call in say.call_args_list:
+            blocks = call.kwargs.get("blocks")
+            if blocks and isinstance(blocks, list):
+                for block in blocks:
+                    if block.get("type") == "actions":
+                        action_ids = [e.get("action_id") for e in block.get("elements", [])]
+                        if "feedback_positive" in action_ids:
+                            feedback_found = True
+        assert feedback_found, "No feedback buttons sent after cancel"
+        thread_store.clear("ts_cancel_001")
+
+    def test_chain_all_skipped_sends_feedback(self):
+        """After skipping all chain steps, feedback buttons should be sent."""
+        from app.handlers.common import thread_store
+
+        thread_store.set("ts_cancel_002", {
+            "operation": "update_hardware",
+            "user_id": "U_CANCEL",
+            "data": {"site_id": "MIG-TR-01"},
+            "raw_message": "test",
+            "sender_name": "Batu",
+            "language": "tr",
+            "chain_steps": ["create_site", "update_hardware"],
+            "pending_operations": [],
+            "completed_operations": [],
+            "skipped_operations": ["create_site"],
+            "current_step": 2,
+            "total_steps": 2,
+        })
+
+        say = MagicMock()
+        body = {
+            "message": {"thread_ts": "ts_cancel_002"},
+            "user": {"id": "U_CANCEL"},
+            "channel": {"id": "C001"},
+        }
+
+        from app.handlers.actions import register
+        from unittest.mock import MagicMock as MM
+        app_mock = MM()
+        handlers = {}
+
+        def capture_action(action_id):
+            def decorator(fn):
+                handlers[action_id] = fn
+                return fn
+            return decorator
+
+        app_mock.action = capture_action
+        register(app_mock)
+
+        handlers["cancel_action"](lambda: None, body, say)
+
+        feedback_found = False
+        for call in say.call_args_list:
+            blocks = call.kwargs.get("blocks")
+            if blocks and isinstance(blocks, list):
+                for block in blocks:
+                    if block.get("type") == "actions":
+                        action_ids = [e.get("action_id") for e in block.get("elements", [])]
+                        if "feedback_positive" in action_ids:
+                            feedback_found = True
+        assert feedback_found, "No feedback buttons sent after all-skipped chain"
+        thread_store.clear("ts_cancel_002")
+
+    def test_cancel_feedback_state_stored(self):
+        """After cancel, thread state should have feedback_pending."""
+        from app.handlers.common import thread_store
+
+        thread_store.set("ts_cancel_003", {
+            "operation": "log_support",
+            "user_id": "U_CANCEL",
+            "data": {"site_id": "MIG-TR-01"},
+            "raw_message": "test",
+            "sender_name": "Batu",
+            "language": "tr",
+        })
+
+        say = MagicMock()
+        body = {
+            "message": {"thread_ts": "ts_cancel_003"},
+            "user": {"id": "U_CANCEL"},
+            "channel": {"id": "C001"},
+        }
+
+        from app.handlers.actions import register
+        from unittest.mock import MagicMock as MM
+        app_mock = MM()
+        handlers = {}
+
+        def capture_action(action_id):
+            def decorator(fn):
+                handlers[action_id] = fn
+                return fn
+            return decorator
+
+        app_mock.action = capture_action
+        register(app_mock)
+
+        handlers["cancel_action"](lambda: None, body, say)
+
+        state = thread_store.get("ts_cancel_003")
+        assert state is not None
+        assert state.get("feedback_pending") is True
+        thread_store.clear("ts_cancel_003")
+
+
 class TestFeedbackThreadState:
     """Test that feedback state is properly stored in thread store."""
 

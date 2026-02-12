@@ -19,10 +19,11 @@ from app.utils.formatters import (
     format_confirmation_message,
     format_data_quality_response,
     format_error_message,
+    format_feedback_buttons,
     format_help_text,
     format_query_response,
 )
-from app.utils.missing_fields import format_missing_fields_message
+from app.utils.missing_fields import enforce_must_fields, format_missing_fields_message
 from app.utils.validators import validate_required_fields
 
 logger = logging.getLogger(__name__)
@@ -261,6 +262,13 @@ def process_message(
         if f not in result.missing_fields:
             result.missing_fields.append(f)
 
+    # Enforce FIELD_REQUIREMENTS must fields (catches fields Claude missed)
+    facility_type = result.data.get("facility_type")
+    result.missing_fields = enforce_must_fields(
+        result.operation, result.data, result.missing_fields,
+        facility_type=facility_type,
+    )
+
     # Build conversation history for multi-turn context
     messages = thread_context or []
     messages.append({"role": "user", "content": f"[Sender: {sender_name}]\n{text}"})
@@ -334,6 +342,7 @@ def process_message(
     if result.missing_fields:
         msg_text, has_blockers = format_missing_fields_message(
             result.missing_fields, result.operation, language=result.language,
+            facility_type=facility_type,
         )
 
         if has_blockers:
@@ -494,7 +503,7 @@ def _handle_query(
     sheets = get_sheets()
 
     def _store_query_state() -> None:
-        """Store thread state so follow-up queries work."""
+        """Store thread state so follow-up queries work, with feedback."""
         if user_id:
             thread_store.set(thread_ts, {
                 "operation": "query",
@@ -503,6 +512,9 @@ def _handle_query(
                 "missing_fields": [],
                 "messages": messages or [],
                 "language": language,
+                "feedback_pending": True,
+                "sender_name": user_id,
+                "raw_message": "",
             })
 
     try:
@@ -656,6 +668,7 @@ def _handle_query(
             say(text=f"Bu sorgu türü henüz desteklenmiyor: {query_type}", thread_ts=thread_ts)
 
         _store_query_state()
+        say(text="Faydalı oldu mu?", blocks=format_feedback_buttons(context="query"), thread_ts=thread_ts)
 
     except Exception as e:
         logger.exception("Query error")

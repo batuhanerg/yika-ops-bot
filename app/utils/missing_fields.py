@@ -2,6 +2,9 @@
 
 Classifies fields as must (blockers) or important (suggestions)
 using FIELD_REQUIREMENTS, then formats them with natural language.
+
+Also provides enforce_must_fields() for code-level must-field validation
+independent of what Claude reports in missing_fields.
 """
 
 from __future__ import annotations
@@ -99,3 +102,37 @@ def format_missing_fields_message(
 
     has_blockers = len(must_fields) > 0
     return "\n".join(lines), has_blockers
+
+
+def enforce_must_fields(
+    operation: str,
+    data: dict,
+    claude_missing: list[str],
+    facility_type: str | None = None,
+) -> list[str]:
+    """Cross-reference extracted data against FIELD_REQUIREMENTS must fields.
+
+    Returns a deduplicated list of all must fields that are missing,
+    including those Claude reported and those it missed.
+    """
+    tab = _OP_TO_TAB.get(operation)
+    if not tab or tab not in FIELD_REQUIREMENTS:
+        return list(claude_missing)
+
+    req = FIELD_REQUIREMENTS[tab]
+    missing: list[str] = list(claude_missing)
+
+    # Check must fields
+    for field in req.get("must", []):
+        if not data.get(field) and field not in missing:
+            missing.append(field)
+
+    # Check must_when_facility_type
+    if facility_type:
+        facility_must = req.get("must_when_facility_type", {})
+        if facility_type in facility_must:
+            for field in facility_must[facility_type]:
+                if not data.get(field) and field not in missing:
+                    missing.append(field)
+
+    return missing

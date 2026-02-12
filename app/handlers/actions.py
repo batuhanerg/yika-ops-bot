@@ -110,6 +110,9 @@ def register(app: App) -> None:
                 if readback:
                     say(text=f"✅ {readback}", thread_ts=thread_ts, channel=channel)
 
+                # Propagate facility_type through chain
+                facility_type = data.get("facility_type") or state.get("facility_type")
+
                 # Build chain state for storage
                 chain_thread_state = {
                     "operation": next_op["operation"],
@@ -125,6 +128,7 @@ def register(app: App) -> None:
                     "current_step": next_step,
                     "total_steps": total_steps,
                     "language": state.get("language", "tr"),
+                    "facility_type": facility_type,
                 }
 
                 # Check if next step has actual data or needs user input
@@ -139,7 +143,7 @@ def register(app: App) -> None:
                     # Empty step — prompt user for data with skip option
                     chain_thread_state["awaiting_chain_input"] = True
                     thread_store.set(thread_ts, chain_thread_state)
-                    blocks = format_chain_input_prompt(next_step, total_steps, next_op["operation"])
+                    blocks = format_chain_input_prompt(next_step, total_steps, next_op["operation"], facility_type=facility_type)
                     say(text=f"Adım {next_step}/{total_steps}", blocks=blocks, thread_ts=thread_ts, channel=channel)
             else:
                 # No more pending — finalize
@@ -242,6 +246,9 @@ def register(app: App) -> None:
 
             say(text="⏭️ Atlandı.", thread_ts=thread_ts, channel=channel)
 
+            # Propagate facility_type through chain
+            facility_type = state.get("data", {}).get("facility_type") or state.get("facility_type") if state else None
+
             chain_thread_state = {
                 "operation": next_op["operation"],
                 "user_id": user_id,
@@ -256,6 +263,7 @@ def register(app: App) -> None:
                 "current_step": next_step,
                 "total_steps": total_steps,
                 "language": lang,
+                "facility_type": facility_type,
             }
 
             has_data = any(v for k, v in next_data.items() if k != "site_id")
@@ -268,7 +276,7 @@ def register(app: App) -> None:
             else:
                 chain_thread_state["awaiting_chain_input"] = True
                 thread_store.set(thread_ts, chain_thread_state)
-                blocks = format_chain_input_prompt(next_step, total_steps, next_op["operation"])
+                blocks = format_chain_input_prompt(next_step, total_steps, next_op["operation"], facility_type=facility_type)
                 say(text=f"Adım {next_step}/{total_steps}", blocks=blocks, thread_ts=thread_ts, channel=channel)
         else:
             in_chain = bool(chain_steps) and len(chain_steps) > 1
@@ -284,12 +292,19 @@ def register(app: App) -> None:
             else:
                 say(text="❌ Cancelled. If I misunderstood, feel free to rephrase.", thread_ts=thread_ts, channel=channel)
 
-            # Keep thread alive so user can rephrase after cancel
+            # Send feedback buttons after cancel
+            say(text="Doğru anladım mı?", blocks=format_feedback_buttons(), thread_ts=thread_ts, channel=channel)
+
+            # Keep thread alive with feedback state
             thread_store.set(thread_ts, {
                 "user_id": user_id,
-                "data": {},
+                "data": state.get("data", {}) if state else {},
                 "messages": state.get("messages", []) if state else [],
                 "language": lang,
+                "feedback_pending": True,
+                "operation": state.get("operation", "") if state else "",
+                "sender_name": state.get("sender_name", "Unknown") if state else "Unknown",
+                "raw_message": state.get("raw_message", "") if state else "",
             })
 
     @app.action("feedback_positive")

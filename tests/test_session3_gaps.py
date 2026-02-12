@@ -86,6 +86,8 @@ class TestDuplicateSiteIdPrevention:
             "facility_type": "Food",
             "contract_status": "Active",
             "go_live_date": "2025-03-01",
+            "supervisor_1": "Ahmet",
+            "phone_1": "555-1234",
         }
         mock_parse_result.error = None
         mock_parse_result.missing_fields = []
@@ -138,6 +140,8 @@ class TestDuplicateSiteIdPrevention:
             "country": "Turkey",
             "facility_type": "Healthcare",
             "contract_status": "Active",
+            "supervisor_1": "Ali",
+            "phone_1": "555-9999",
         }
         mock_parse_result.error = None
         mock_parse_result.missing_fields = []

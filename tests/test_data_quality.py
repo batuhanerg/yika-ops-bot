@@ -451,8 +451,9 @@ class TestDataQualityQueryWiring:
             thread_ts="T001",
             say=say,
         )
-        say.assert_called_once()
-        blocks = say.call_args[1]["blocks"]
+        # First call is query result, second is feedback buttons
+        assert say.call_count >= 1
+        blocks = say.call_args_list[0][1]["blocks"]
         text = json.dumps(blocks)
         assert "Eksik Veri Raporu" in text
 
@@ -474,7 +475,8 @@ class TestDataQualityQueryWiring:
             thread_ts="T001",
             say=say,
         )
-        say.assert_called_once()
-        blocks = say.call_args[1]["blocks"]
+        # First call is query result, second is feedback buttons
+        assert say.call_count >= 1
+        blocks = say.call_args_list[0][1]["blocks"]
         text = json.dumps(blocks)
         assert "Eski Veri Raporu" in text

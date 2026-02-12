@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.7.0 — Validation, Feedback, and Sheet Migrations (2026-02-12)
+
+### Added
+- **Must-field validation independent of Claude** — `enforce_must_fields()` validates required fields using `FIELD_REQUIREMENTS` before showing confirmation, catching fields Claude may have missed
+- **Chain step must-field prompts** — each chain step shows required fields as friendly Turkish questions (e.g., "Hangi cihaz türü?") with `format_chain_input_prompt()`; facility-type-aware for implementation steps
+- **Feedback on every interaction** — 👍/👎 buttons now appear after queries, data quality reports, cancel confirmations, and chain completions (previously only after writes)
+  - Context-aware question: "Doğru kaydedildi mi?" for writes, "Faydalı oldu mu?" for queries
+- **Help command field requirements section** — `/mustafa yardım` now shows required fields per operation with friendly Turkish names, dynamically generated from `FIELD_REQUIREMENTS` and `FRIENDLY_FIELD_MAP`
+- **Dashboard migration script** (`scripts/migrate_dashboard.py`) — replaces "Total Devices" column with 5 device-type breakdown columns (Tags, Anchors, Gateways, Charging Docks, Other) using SUMIFS formulas
+- **Site Viewer migration script** (`scripts/migrate_site_viewer.py`) — customer name selector ("Migros (MIG-TR-01)"), support log sorted by Received Date descending, widened key columns
+- **Conditional formatting migration script** (`scripts/migrate_conditional_formatting.py`) — color-coded rules across all tabs: 🔴 red for empty must fields, 🟡 yellow for empty important fields, 🔵 blue for stale Last Verified (>30 days), 🟠 orange for aging open tickets (>7 days); supports `--dry-run` flag
+
+### New Files
+- `scripts/migrate_dashboard.py` — Dashboard device breakdown migration
+- `scripts/migrate_site_viewer.py` — Site Viewer UX migration
+- `scripts/migrate_conditional_formatting.py` — Conditional formatting migration
+- `tests/test_chain_step_prompts.py` — 10 tests for chain step field prompts
+- `tests/test_migrate_dashboard.py` — 11 tests for dashboard migration
+- `tests/test_migrate_site_viewer.py` — 6 tests for site viewer migration
+- `tests/test_migrate_conditional_formatting.py` — 22 tests for conditional formatting
+
+### Changed
+- `format_feedback_buttons()` now accepts `context` parameter ("write" or "query")
+- `format_help_text()` dynamically generates field requirements from config
+- Cancel handler sends feedback buttons after ending interaction
+- Query handler stores `feedback_pending: True` in thread state
+
 ## v1.6.1 — Schema Patch: Column Alignment and Facility-Type Conditionals (2026-02-12)
 
 ### Fixed

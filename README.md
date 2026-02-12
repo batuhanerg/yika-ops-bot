@@ -4,7 +4,7 @@ A Slack bot for ERG Controls that manages IoT customer support operations throug
 
 ## Status
 
-**Session 5: Schema Changes, Field Classification, and Data Quality Overhaul** — Complete (226 tests passing)
+**Session 6: Validation, Feedback, and Sheet Migrations** — Complete (316 tests passing)
 Deployed to Cloud Run (`europe-west1`), live in `#technical-operations`.
 
 ## Quick Start
@@ -89,6 +89,15 @@ ngrok http 8080
 - **Friendly missing fields** — Turkish questions instead of raw field names; only must fields block the flow
 - **"saha" terminology** — all user-facing Turkish text uses "saha" instead of "site"
 
+### Session 6: Validation, Feedback, and Sheet Migrations
+- **Must-field validation independent of Claude** — `enforce_must_fields()` catches missing required fields before confirmation
+- **Chain step field prompts** — each chain step shows required fields as friendly Turkish questions, facility-type-aware
+- **Feedback on every interaction** — 👍/👎 buttons after writes, queries, cancels, and chain completions
+- **Help command overhaul** — field requirements per operation shown with friendly Turkish names
+- **Dashboard migration** — "Total Devices" → device-type breakdown (Tags, Anchors, Gateways, Charging Docks, Other)
+- **Site Viewer migration** — customer name selector, descending date sort, widened columns
+- **Conditional formatting migration** — color-coded rules for empty must/important fields, stale data, aging tickets
+
 ## Project Structure
 
 ```
@@ -136,7 +145,17 @@ tests/
 ├── test_feedback.py        — Feedback loop (thumbs up/down)
 ├── test_rename_responsible.py — Technician→Responsible rename
 ├── test_session3_gaps.py   — Dedup, stock xref, permissions (14 tests)
-└── test_help_and_readback.py  — Help text + Sheet link readback
+├── test_help_and_readback.py  — Help text + Sheet link readback
+├── test_chain_step_prompts.py — Chain step field prompts (10 tests)
+├── test_migrate_dashboard.py  — Dashboard migration (11 tests)
+├── test_migrate_site_viewer.py — Site Viewer migration (6 tests)
+└── test_migrate_conditional_formatting.py — Conditional formatting (22 tests)
+
+scripts/
+├── migrate_technician_to_responsible.py — Column rename migration
+├── migrate_dashboard.py    — Dashboard device breakdown migration
+├── migrate_site_viewer.py  — Site Viewer UX migration
+└── migrate_conditional_formatting.py — Conditional formatting migration
 ```
 
 ### Deploy to Cloud Run

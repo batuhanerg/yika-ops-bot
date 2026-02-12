@@ -297,6 +297,37 @@ def format_help_text() -> list[dict]:
 
     blocks.append({"type": "divider"})
 
+    # Field requirements section — dynamically built from FIELD_REQUIREMENTS
+    from app.field_config.field_requirements import FIELD_REQUIREMENTS
+    from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+    _help_ops = [
+        ("📞 Destek Kaydı", "support_log"),
+        ("📋 Yeni Saha", "sites"),
+        ("🔧 Donanım", "hardware_inventory"),
+        ("⚙️ Kurulum Ayarları", "implementation_details"),
+        ("📦 Stok", "stock"),
+    ]
+
+    req_lines = ["*🔹 Her İşlem İçin Gerekli Bilgiler*\n"]
+    for label, tab in _help_ops:
+        req = FIELD_REQUIREMENTS.get(tab, {})
+        must_fields = req.get("must", [])
+        friendly = [FRIENDLY_FIELD_MAP.get(f, f) for f in must_fields if f != "site_id"]
+        if friendly:
+            field_str = ", ".join(friendly)
+            req_lines.append(f"*{label}:* {field_str}")
+
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "\n".join(req_lines),
+        },
+    })
+
+    blocks.append({"type": "divider"})
+
     blocks.append({
         "type": "section",
         "text": {
@@ -324,14 +355,18 @@ def format_help_text() -> list[dict]:
     return blocks
 
 
-def format_feedback_buttons() -> list[dict]:
-    """Format a follow-up message with 👍/👎 buttons after a write action."""
+def format_feedback_buttons(context: str = "write") -> list[dict]:
+    """Format a follow-up message with 👍/👎 buttons.
+
+    context: "write" for after writes, "query" for after query responses.
+    """
+    question = "Faydalı oldu mu?" if context == "query" else "Doğru kaydedildi mi?"
     return [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "Doğru kaydedildi mi?",
+                "text": question,
             },
         },
         {
@@ -412,15 +447,65 @@ def format_data_quality_response(
     return blocks
 
 
-def format_chain_input_prompt(step: int, total: int, operation: str) -> list[dict]:
-    """Format a prompt for an empty chain step, asking user for data or to skip."""
+def format_chain_input_prompt(
+    step: int,
+    total: int,
+    operation: str,
+    facility_type: str | None = None,
+) -> list[dict]:
+    """Format a prompt for an empty chain step, asking user for data or to skip.
+
+    Includes must/important field hints from FIELD_REQUIREMENTS.
+    """
+    from app.utils.missing_fields import _OP_TO_TAB
+    from app.field_config.field_requirements import FIELD_REQUIREMENTS
+    from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
     label = CHAIN_LABELS.get(operation, operation).capitalize()
+
+    # Build field hints from FIELD_REQUIREMENTS
+    tab = _OP_TO_TAB.get(operation)
+    field_lines: list[str] = []
+    if tab and tab in FIELD_REQUIREMENTS:
+        req = FIELD_REQUIREMENTS[tab]
+
+        must_fields = list(req.get("must", []))
+        # Add facility-type must fields
+        if facility_type:
+            facility_must = req.get("must_when_facility_type", {})
+            if facility_type in facility_must:
+                must_fields.extend(facility_must[facility_type])
+
+        important_fields = list(req.get("important", []))
+        # HW conditional important fields (simplified — show them)
+        for field_key in req.get("important_conditional", {}):
+            if field_key not in important_fields:
+                important_fields.append(field_key)
+
+        if must_fields:
+            field_lines.append("Kaydı oluşturabilmem için şu bilgiler gerekli:")
+            for f in must_fields:
+                question = FRIENDLY_FIELD_MAP.get(f, f)
+                field_lines.append(f"  • {question}")
+
+        if important_fields:
+            field_lines.append("Kaydı zenginleştirmek için şunlar da faydalı olur:")
+            for f in important_fields:
+                question = FRIENDLY_FIELD_MAP.get(f, f)
+                field_lines.append(f"  • {question}")
+
+    field_text = "\n".join(field_lines)
+    body = f"📝 *Adım {step}/{total} — {label}*"
+    if field_text:
+        body += f"\n{field_text}"
+    body += "\nBu thread'e yazın veya ⏭️ ile atlayın."
+
     return [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"📝 *Adım {step}/{total} — {label}*\nBilgileri bu thread'e yazın veya atlayın.",
+                "text": body,
             },
         },
         {

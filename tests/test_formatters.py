@@ -118,6 +118,47 @@ class TestHelpText:
         assert "Stok" in text or "stok" in text
         assert "Sorgula" in text or "sorgula" in text
 
+    def test_help_shows_field_requirements_section(self):
+        """Item 4: Help should have a field requirements section."""
+        blocks = format_help_text()
+        text = _blocks_to_text(blocks)
+        assert "gerekli" in text.lower() or "zorunlu" in text.lower()
+
+    def test_help_shows_support_log_must_fields(self):
+        """Help should list support log must fields with friendly names."""
+        blocks = format_help_text()
+        text = _blocks_to_text(blocks)
+        # responsible → "kim ilgileniyor"
+        assert "kim ilgileniyor" in text.lower() or "sorumlu" in text.lower()
+
+    def test_help_shows_create_site_must_fields(self):
+        """Help should list create_site must fields with friendly names."""
+        blocks = format_help_text()
+        text = _blocks_to_text(blocks)
+        # customer → "Müşterinin adı ne?"
+        assert "müşteri" in text.lower()
+        # facility_type → "Tesis türü ne?"
+        assert "tesis" in text.lower() or "facility" in text.lower()
+
+    def test_help_shows_hardware_must_fields(self):
+        """Help should list hardware must fields with friendly names."""
+        blocks = format_help_text()
+        text = _blocks_to_text(blocks)
+        # device_type → "Hangi cihaz türü?"
+        assert "cihaz" in text.lower()
+        # qty → "Kaç adet?"
+        assert "adet" in text.lower()
+
+    def test_help_uses_friendly_names_not_raw_fields(self):
+        """Help should not show raw field names like 'responsible' or 'device_type'."""
+        blocks = format_help_text()
+        text = _blocks_to_text(blocks)
+        # These raw field names should NOT appear
+        assert "responsible" not in text
+        assert "device_type" not in text
+        assert "issue_summary" not in text
+        assert "received_date" not in text
+
 
 def _blocks_to_text(blocks: list[dict]) -> str:
     """Extract all text content from Slack Block Kit blocks for assertion."""
