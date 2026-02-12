@@ -232,9 +232,9 @@ def process_message(
                 if v and k != "_row_index":
                     merged[k] = v
             result.data = merged
-        elif existing_state.get("missing_fields"):
-            # We were waiting for missing fields — keep original operation and merge
-            # (Claude may re-classify the short reply as a different operation)
+        elif existing_state.get("missing_fields") or existing_state.get("awaiting_chain_input"):
+            # We were waiting for missing fields or chain step input — keep original
+            # operation and merge (Claude may re-classify the reply as a different operation)
             result.operation = original_op
             merged = {**original_data}
             for k, v in result.data.items():
