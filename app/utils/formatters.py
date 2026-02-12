@@ -41,20 +41,30 @@ FIELD_LABELS: dict[str, str] = {
     "email_2": "Email 2",
     "dashboard_link": "Dashboard Link",
     "address": "Address",
+    "internet_provider": "Internet Provider",
+    "ssid": "SSID",
+    "password": "Password",
+    "whatsapp_group": "WhatsApp Group",
+    "dispenser_anchor_placement": "Dispenser Anchor Placement",
+    "clean_hygiene_time": "Clean Hygiene Time",
+    "hp_alert_time": "HP Alert Time",
+    "hand_hygiene_time": "Hand Hygiene Time",
+    "hand_hygiene_interval": "Hand Hygiene Interval",
+    "hand_hygiene_type": "Hand Hygiene Type",
 }
 
 OPERATION_TITLES: dict[str, str] = {
     "log_support": "Destek Kaydı / Support Log",
-    "create_site": "Yeni Site / New Site",
+    "create_site": "Yeni Saha / New Site",
     "update_support": "Destek Güncelleme / Support Update",
-    "update_site": "Site Güncelleme / Site Update",
+    "update_site": "Saha Güncelleme / Site Update",
     "update_hardware": "Donanım Güncelleme / Hardware Update",
     "update_implementation": "Ayar Güncelleme / Implementation Update",
     "update_stock": "Stok Güncelleme / Stock Update",
 }
 
 CHAIN_LABELS: dict[str, str] = {
-    "create_site": "site",
+    "create_site": "saha",
     "update_hardware": "donanım",
     "update_implementation": "ayarlar",
     "log_support": "destek kaydı",
@@ -188,8 +198,8 @@ def format_error_message(error_type: str, **kwargs: Any) -> list[dict]:
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"⚠️ *\"{site_name}\"* isimde bir site bulamadım.\n"
-                    f"Mevcut siteler: {sites_text}"
+                    f"⚠️ *\"{site_name}\"* adında bir saha bulunamadı.\n"
+                    f"Mevcut sahalar: {sites_text}"
                 ),
             },
         })
@@ -275,7 +285,7 @@ def format_help_text() -> list[dict]:
                 "`@mustafa stoka 10 yeni tag ekle, İstanbul ofis`\n\n"
                 "🔍 *Bilgi Sorgula*\n"
                 "`@mustafa ASM'nin durumu ne?`\n"
-                "`@mustafa tüm sitelerde açık ticket var mı?`\n"
+                "`@mustafa tüm sahalarda açık ticket var mı?`\n"
                 "`@mustafa stokta kaç tag var?`\n\n"
                 "📊 *Veri Kalitesi*\n"
                 "`@mustafa eksik bilgiler var mı?`\n"
@@ -351,10 +361,10 @@ def format_data_quality_response(
     blocks: list[dict] = []
 
     if check_type == "missing_data":
-        scope = f"`{site_id}`" if site_id else "Tüm siteler"
+        scope = f"`{site_id}`" if site_id else "Tüm sahalar"
         title = f"📊 Eksik Veri Raporu — {scope}"
     else:
-        scope = f"`{site_id}`" if site_id else "Tüm siteler"
+        scope = f"`{site_id}`" if site_id else "Tüm sahalar"
         title = f"📊 Eski Veri Raporu — {scope}"
 
     blocks.append({
@@ -380,7 +390,14 @@ def format_data_quality_response(
         for iss in site_issues:
             tab = iss.get("tab", "")
             detail = iss.get("detail", "")
-            lines.append(f"  • _{tab}:_ {detail}")
+            severity = iss.get("severity", "")
+            if severity == "must":
+                prefix = "🔴"
+            elif severity == "important":
+                prefix = "🟡"
+            else:
+                prefix = "•"
+            lines.append(f"  {prefix} _{tab}:_ {detail}")
         blocks.append({
             "type": "section",
             "text": {"type": "mrkdwn", "text": "\n".join(lines)},

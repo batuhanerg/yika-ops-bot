@@ -77,6 +77,31 @@ class TestAmbiguousMatch:
         assert len(results) == 2
 
 
+class TestDynamicCustomerMatch:
+    """Test that customer names from Sites tab are matched dynamically."""
+
+    def test_dynamic_customer_name_match(self):
+        """A customer added at runtime (not in KNOWN_ALIASES) should be found."""
+        sites = [
+            {"Site ID": "EST-TR-01", "Customer": "Este Nove"},
+            {"Site ID": "BRN-TR-01", "Customer": "Biruni Hastanesi"},
+        ]
+        r = SiteResolver(sites)
+        results = r.resolve("Este Nove")
+        assert len(results) == 1
+        assert results[0]["Site ID"] == "EST-TR-01"
+
+    def test_dynamic_customer_fuzzy_match(self):
+        """Fuzzy match against dynamically loaded customer names."""
+        sites = [
+            {"Site ID": "BRN-TR-01", "Customer": "Biruni Hastanesi"},
+        ]
+        r = SiteResolver(sites)
+        results = r.resolve("Biruni")
+        assert len(results) == 1
+        assert results[0]["Site ID"] == "BRN-TR-01"
+
+
 class TestNoMatch:
     def test_no_match_returns_empty(self, resolver: SiteResolver):
         results = resolver.resolve("Nonexistent Company XYZ 12345")

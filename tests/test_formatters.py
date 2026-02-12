@@ -94,7 +94,7 @@ class TestErrorMessage:
         )
         text = _blocks_to_text(blocks)
 
-        assert "Bilinmeyen Firma" in text or "bulamadım" in text.lower()
+        assert "Bilinmeyen Firma" in text or "bulunamadı" in text.lower()
         assert "ASM-TR-01" in text
         assert "MIG-TR-01" in text
 

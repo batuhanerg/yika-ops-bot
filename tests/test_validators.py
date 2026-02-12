@@ -188,6 +188,16 @@ class TestDropdownValidation:
     def test_valid_device_type(self):
         assert validate_dropdown_value("device_type", "Tag") is True
 
+    def test_valid_contract_status_awaiting_installation(self):
+        assert validate_dropdown_value("contract_status", "Awaiting Installation") is True
+
+    def test_invalid_contract_status_pending(self):
+        """'Pending' was renamed to 'Awaiting Installation'."""
+        assert validate_dropdown_value("contract_status", "Pending") is False
+
+    def test_valid_internet_provider(self):
+        assert validate_dropdown_value("internet_provider", "ERG Controls") is True
+
     def test_invalid_value(self):
         assert validate_dropdown_value("support_type", "Teleport") is False
 

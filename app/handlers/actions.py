@@ -455,7 +455,7 @@ def _build_readback(sheets: SheetsService, operation: str, data: dict[str, Any],
             return f"📊 `{site_id}`: {total} toplam kayıt, {open_count} açık ticket."
 
         elif operation == "create_site":
-            return f"🆕 `{site_id}` sitesi oluşturuldu."
+            return f"🆕 `{site_id}` sahası oluşturuldu."
 
         elif operation == "update_hardware":
             hw = sheets.read_hardware(site_id)

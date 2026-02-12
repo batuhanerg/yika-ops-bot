@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.6.1 — Schema Patch: Column Alignment and Facility-Type Conditionals (2026-02-12)
+
+### Fixed
+- **Implementation Details column order** — mock and system prompt now match actual Google Sheet column order (Dispenser anchor power type at position 11, after Entry time)
+- **"saha" terminology** — fixed remaining "site" → "saha" in Turkish ambiguous-match message
+
+### Added
+- **6 new Implementation Details columns** in field labels, system prompt, and friendly field map: Dispenser anchor placement, Clean hygiene time, HP alert time, Hand hygiene time, Hand hygiene interval, Hand hygiene type
+- **`must_when_facility_type` classification** — Food sites require clean_hygiene_time, hp_alert_time, hand_hygiene_time, hand_hygiene_interval, hand_hygiene_type; Healthcare sites require tag_clean_to_red_timeout
+- **Facility-type-aware data quality** — `find_missing_data()` evaluates implementation must fields based on site's Facility Type
+- **Facility-type-aware missing fields** — `format_missing_fields_message()` accepts `facility_type` param for correct must/important classification
+- 6 new facility-type data quality tests, 4 new facility-type classification tests, 2 new friendly field coverage tests
+
+## v1.6.0 — Schema Changes, Field Classification, and Data Quality Overhaul (2026-02-12)
+
+### Added
+- **Field classification config** (`app/field_config/field_requirements.py`) — structured `must` / `important` / `important_conditional` / `optional` classification per tab, driving validation and data quality checks
+- **Friendly missing fields messages** — missing fields shown as natural Turkish questions (e.g., "Bu konuyla kim ilgileniyor?") instead of raw field names; must fields block, important fields suggest
+- **WhatsApp Group column** on Sites tab
+- **Internet Provider / SSID / Password columns** replace "Internet Connection" on Implementation Details tab
+- **Context-aware data quality** — "Awaiting Installation" sites skip hardware, implementation, and support log checks
+- **Conditional field importance** — FW/HW Version only flagged for electronic devices (not Charging Dock, Power Bank, etc.); root_cause only flagged when status ≠ Open
+- **Severity levels in data quality reports** — 🔴 for must fields, 🟡 for important fields
+- `CONTEXT_RULES` config for status-based tab skipping
+- `FRIENDLY_FIELD_MAP` with Turkish questions for all field names
+- `format_missing_fields_message()` utility that classifies and formats missing fields
+
+### Changed
+- **Contract Status enum**: "Pending" renamed to "Awaiting Installation" across code, prompts, and vocabulary
+- **Turkish terminology**: all user-facing Turkish text uses "saha" instead of "site" (e.g., "müşteri sahası", "Mevcut sahalar")
+- **Data quality engine** (`data_quality.py`) fully rewritten to use `FIELD_REQUIREMENTS` instead of hardcoded field lists
+- **Missing fields handling** in `common.py`: only must fields block the flow; important-only fields proceed to confirmation with a suggestion note
+- `INTERNET_PROVIDERS` enum added: "ERG Controls", "Müşteri"
+- `internet_provider` added to `DROPDOWN_FIELDS` for validation
+
+### New Files
+- `app/field_config/__init__.py` — field config package
+- `app/field_config/field_requirements.py` — `FIELD_REQUIREMENTS` + `CONTEXT_RULES`
+- `app/field_config/friendly_fields.py` — `FRIENDLY_FIELD_MAP`
+- `app/utils/missing_fields.py` — `format_missing_fields_message()`
+- `tests/test_field_requirements.py` — 16 tests for field config
+- `tests/test_friendly_fields.py` — 15 tests for friendly field messages
+
 ## v1.5.0 — Create-Site Wizard, Data Quality, and UX Polish (2026-02-11)
 
 ### Added

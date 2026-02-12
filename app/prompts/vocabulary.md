@@ -7,7 +7,8 @@
 - **Root Cause**: HW Fault (Production), HW Fault (Customer), FW Bug, Dashboard Bug, User Error, Configuration, Feature Request, Pending, Other
 - **Facility Type**: Food, Healthcare
 - **Device Type**: Tag, Anchor, Gateway, Charging Dock, Power Bank, Power Adapter, USB Cable, Other
-- **Contract Status**: Active, Pending, Expired, Pilot
+- **Contract Status**: Active, Awaiting Installation, Expired, Pilot
+- **Internet Provider**: ERG Controls, Müşteri
 - **Stock Condition**: New, Refurbished, Faulty, Reserved
 - **Stock Location**: Istanbul Office, Adana Storage, Other
 

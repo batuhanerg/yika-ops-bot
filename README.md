@@ -4,7 +4,7 @@ A Slack bot for ERG Controls that manages IoT customer support operations throug
 
 ## Status
 
-**Session 4: Polish, Feedback Loop, and Data Quality** — Complete (181 tests passing)
+**Session 5: Schema Changes, Field Classification, and Data Quality Overhaul** — Complete (226 tests passing)
 Deployed to Cloud Run (`europe-west1`), live in `#technical-operations`.
 
 ## Quick Start
@@ -80,13 +80,26 @@ ngrok http 8080
 - **Stock readback** after stock update confirmations
 - **Audit log guardrails** — failed writes and cancellations now logged with FAILED/CANCELLED operation types
 
+### Session 5: Schema Changes, Field Classification, and Data Quality Overhaul
+- **Implementation Details columns restructured** — "Internet Connection" replaced with Internet Provider (dropdown), SSID, Password
+- **WhatsApp Group column** added to Sites tab
+- **Contract Status**: "Pending" renamed to "Awaiting Installation"
+- **Field classification config** — `FIELD_REQUIREMENTS` with must/important/optional per tab; `CONTEXT_RULES` for status-based tab skipping
+- **Data quality engine rewritten** — uses `FIELD_REQUIREMENTS` with severity levels (🔴 must, 🟡 important), context-aware skipping, conditional importance
+- **Friendly missing fields** — Turkish questions instead of raw field names; only must fields block the flow
+- **"saha" terminology** — all user-facing Turkish text uses "saha" instead of "site"
+
 ## Project Structure
 
 ```
 app/
 ├── main.py                 — Entry point, Slack Bolt app init
 ├── config.py               — Environment configuration
+├── version.py              — Version and release notes
 ├── models/operations.py    — Pydantic models, enums, required fields
+├── field_config/
+│   ├── field_requirements.py — FIELD_REQUIREMENTS + CONTEXT_RULES
+│   └── friendly_fields.py  — FRIENDLY_FIELD_MAP (field → Turkish question)
 ├── services/
 │   ├── claude.py           — Claude API integration + prompt building
 │   ├── sheets.py           — Google Sheets read/write operations
@@ -104,21 +117,25 @@ app/
 │   └── team_context.md     — Team members, site aliases, business rules
 └── utils/
     ├── validators.py       — Field validation
-    └── formatters.py       — Slack Block Kit message formatting
+    ├── formatters.py       — Slack Block Kit message formatting
+    └── missing_fields.py   — Friendly missing fields formatter
 
 tests/
 ├── test_parsing.py         — Claude parsing (10 integration tests)
-├── test_validators.py      — Field validation (31 tests)
-├── test_site_resolver.py   — Site resolution (11 tests)
+├── test_validators.py      — Field validation (34 tests)
+├── test_site_resolver.py   — Site resolution (13 tests)
 ├── test_formatters.py      — Message formatting (6 tests)
 ├── test_sheets.py          — Sheets operations (16 tests, mocked)
 ├── test_threads.py         — Thread state (7 tests)
 ├── test_chain.py           — Chain wizard + normalization (20 tests)
-├── test_data_quality.py    — Missing/stale data queries (19 tests)
+├── test_data_quality.py    — Data quality with severity (28 tests)
+├── test_field_requirements.py — Field config structure (16 tests)
+├── test_friendly_fields.py — Friendly field messages (15 tests)
 ├── test_stock_audit.py     — Stock readback + key mapping (5 tests)
 ├── test_audit_guardrails.py — Failed/cancelled audit logging (12 tests)
 ├── test_feedback.py        — Feedback loop (thumbs up/down)
 ├── test_rename_responsible.py — Technician→Responsible rename
+├── test_session3_gaps.py   — Dedup, stock xref, permissions (14 tests)
 └── test_help_and_readback.py  — Help text + Sheet link readback
 ```
 

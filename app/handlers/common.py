@@ -22,6 +22,7 @@ from app.utils.formatters import (
     format_help_text,
     format_query_response,
 )
+from app.utils.missing_fields import format_missing_fields_message
 from app.utils.validators import validate_required_fields
 
 logger = logging.getLogger(__name__)
@@ -285,7 +286,7 @@ def process_message(
         else:
             sites_text = "\n".join(f"• `{m['Site ID']}` — {m.get('Customer', '')}" for m in matches)
             say(
-                text=f"Birden fazla site eşleşti. Hangisini kastediyorsunuz?\n{sites_text}",
+                text=f"Birden fazla saha eşleşti. Hangisini kastediyorsunuz?\n{sites_text}",
                 thread_ts=thread_ts,
             )
             return
@@ -331,36 +332,34 @@ def process_message(
 
     # Check for missing fields
     if result.missing_fields:
-        missing_state: dict[str, Any] = {
-            "operation": result.operation,
-            "user_id": user_id,
-            "data": result.data,
-            "missing_fields": result.missing_fields,
-            "messages": messages,
-            "language": result.language,
-        }
-        # Preserve chain context if present
-        if existing_state:
-            for key in ("chain_steps", "current_step", "total_steps",
-                        "completed_operations", "skipped_operations",
-                        "pending_operations", "raw_message", "sender_name"):
-                if key in existing_state:
-                    missing_state[key] = existing_state[key]
-        thread_store.set(thread_ts, missing_state)
+        msg_text, has_blockers = format_missing_fields_message(
+            result.missing_fields, result.operation, language=result.language,
+        )
 
-        # Build missing fields message
-        field_names = ", ".join(f"`{f}`" for f in result.missing_fields)
-        if result.language == "tr":
-            say(
-                text=f"Eksik bilgiler var: {field_names}\nLütfen bu bilgileri gönderin.",
-                thread_ts=thread_ts,
-            )
-        else:
-            say(
-                text=f"Missing information: {field_names}\nPlease provide these details.",
-                thread_ts=thread_ts,
-            )
-        return
+        if has_blockers:
+            # Must fields missing — block until user provides them
+            missing_state: dict[str, Any] = {
+                "operation": result.operation,
+                "user_id": user_id,
+                "data": result.data,
+                "missing_fields": result.missing_fields,
+                "messages": messages,
+                "language": result.language,
+            }
+            # Preserve chain context if present
+            if existing_state:
+                for key in ("chain_steps", "current_step", "total_steps",
+                            "completed_operations", "skipped_operations",
+                            "pending_operations", "raw_message", "sender_name"):
+                    if key in existing_state:
+                        missing_state[key] = existing_state[key]
+            thread_store.set(thread_ts, missing_state)
+            say(text=msg_text, thread_ts=thread_ts)
+            return
+
+        # Only important fields missing — proceed to confirmation with a note
+        if msg_text:
+            say(text=msg_text, thread_ts=thread_ts)
 
     # Check warnings
     if result.warnings and "old_date" in result.warnings:
@@ -396,9 +395,9 @@ def process_message(
                 if any(s["Site ID"] == site_id for s in existing):
                     say(
                         text=(
-                            f"⚠️ `{site_id}` zaten mevcut. Yeni site oluşturmak yerine "
+                            f"⚠️ `{site_id}` zaten mevcut. Yeni saha oluşturmak yerine "
                             f"güncellemek mi istiyorsunuz?\n"
-                            f"Yeni site olarak devam etmek istiyorsanız lütfen farklı bir Site ID belirtin."
+                            f"Yeni saha olarak devam etmek istiyorsanız lütfen farklı bir Site ID belirtin."
                         ),
                         thread_ts=thread_ts,
                     )
@@ -509,7 +508,7 @@ def _handle_query(
     try:
         if query_type in ("site_summary", "site_status"):
             if not site_id:
-                say(text="Hangi site hakkında bilgi istiyorsunuz?", thread_ts=thread_ts)
+                say(text="Hangi saha hakkında bilgi istiyorsunuz?", thread_ts=thread_ts)
                 return
             sites = sheets.read_sites()
             site_info = next((s for s in sites if s["Site ID"] == site_id), None)
@@ -560,7 +559,7 @@ def _handle_query(
 
         elif query_type == "implementation":
             if not site_id:
-                say(text="Hangi sitenin kurulum detaylarını görmek istiyorsunuz?", thread_ts=thread_ts)
+                say(text="Hangi sahanın kurulum detaylarını görmek istiyorsunuz?", thread_ts=thread_ts)
                 return
             impl = sheets.read_implementation(site_id)
             if not impl:
@@ -576,7 +575,7 @@ def _handle_query(
 
         elif query_type == "hardware":
             if not site_id:
-                say(text="Hangi sitenin donanım envanterini görmek istiyorsunuz?", thread_ts=thread_ts)
+                say(text="Hangi sahanın donanım envanterini görmek istiyorsunuz?", thread_ts=thread_ts)
                 return
             hw = sheets.read_hardware(site_id)
             if not hw:
@@ -599,7 +598,7 @@ def _handle_query(
 
         elif query_type == "support_history":
             if not site_id:
-                say(text="Hangi sitenin destek geçmişini görmek istiyorsunuz?", thread_ts=thread_ts)
+                say(text="Hangi sahanın destek geçmişini görmek istiyorsunuz?", thread_ts=thread_ts)
                 return
             support = sheets.read_support_log(site_id)
             if not support:
@@ -680,7 +679,8 @@ _COUNTRY_NAMES = {
 _VALID_SITE_KEYS = {
     "site_id", "customer", "city", "country", "address", "facility_type",
     "dashboard_link", "supervisor_1", "phone_1", "email_1",
-    "supervisor_2", "phone_2", "email_2", "go_live_date", "contract_status", "notes",
+    "supervisor_2", "phone_2", "email_2", "go_live_date", "contract_status",
+    "notes", "whatsapp_group",
 }
 
 

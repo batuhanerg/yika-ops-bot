@@ -58,11 +58,17 @@ yika-ops-bot/
 │   │   ├── __init__.py
 │   │   ├── claude.py            # Claude API integration + prompt building
 │   │   ├── sheets.py            # Google Sheets read/write operations
-│   │   └── site_resolver.py     # Customer name → Site ID resolution
+│   │   ├── site_resolver.py     # Customer name → Site ID resolution
+│   │   └── data_quality.py      # Missing/stale data detection
 │   │
 │   ├── models/
 │   │   ├── __init__.py
 │   │   └── operations.py        # Pydantic models for each operation type
+│   │
+│   ├── field_config/
+│   │   ├── __init__.py
+│   │   ├── field_requirements.py # FIELD_REQUIREMENTS + CONTEXT_RULES
+│   │   └── friendly_fields.py   # FRIENDLY_FIELD_MAP (field → Turkish question)
 │   │
 │   ├── prompts/
 │   │   ├── system_prompt.md     # Main Claude system prompt
@@ -72,7 +78,8 @@ yika-ops-bot/
 │   └── utils/
 │       ├── __init__.py
 │       ├── validators.py        # Field validation (dates, enums, required fields)
-│       └── formatters.py        # Slack Block Kit message formatting
+│       ├── formatters.py        # Slack Block Kit message formatting
+│       └── missing_fields.py    # Friendly missing fields formatter
 │
 ├── tests/
 │   ├── conftest.py              # Shared fixtures
@@ -81,7 +88,10 @@ yika-ops-bot/
 │   ├── test_sheets.py           # Sheets read/write
 │   ├── test_site_resolver.py    # Site name resolution
 │   ├── test_formatters.py       # Slack message formatting
-│   └── test_chain.py            # Chain wizard + normalization
+│   ├── test_chain.py            # Chain wizard + normalization
+│   ├── test_data_quality.py     # Data quality with severity
+│   ├── test_field_requirements.py # Field config structure
+│   └── test_friendly_fields.py  # Friendly field messages
 │
 ├── Dockerfile                   # Cloud Run deployment
 └── .dockerignore
@@ -241,6 +251,28 @@ GOOGLE_SERVICE_ACCOUNT_JSON=...
 - Technician resolves to Slack display name, not short team name
 
 **22 new tests** in `tests/test_chain.py` (normalization, roadmap, step indicators, final summary, list serialization)
+
+---
+
+## SESSION 5: Schema Changes, Field Classification, and Data Quality Overhaul ✅
+
+**Status:** Complete — 226 tests passing.
+
+**What was built:**
+- Implementation Details columns restructured: "Internet Connection" → Internet Provider (dropdown), SSID, Password
+- WhatsApp Group column added to Sites tab
+- Contract Status: "Pending" → "Awaiting Installation"
+- Field classification config (`app/field_config/field_requirements.py`): must/important/important_conditional/optional per tab
+- Context rules: "Awaiting Installation" sites skip hardware/implementation/support checks
+- Data quality engine fully rewritten to use FIELD_REQUIREMENTS with severity levels (🔴 must / 🟡 important)
+- Friendly missing fields messages: Turkish questions instead of raw field names
+- Missing fields flow: only must fields block; important fields shown as suggestions
+- "saha" terminology throughout all user-facing Turkish text
+- Internet Provider dropdown validation ("ERG Controls", "Müşteri")
+
+**New packages:** `app/field_config/` (field_requirements.py, friendly_fields.py), `app/utils/missing_fields.py`
+
+**31 new tests** in `tests/test_field_requirements.py` (16) and `tests/test_friendly_fields.py` (15)
 
 ---
 

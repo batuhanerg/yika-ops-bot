@@ -67,14 +67,14 @@ Tag, Anchor, Gateway, Charging Dock, Power Bank, Power Adapter, USB Cable, Other
 Always include a suggested site_id: XXX-CC-NN (XXX=abbreviation, CC=country code, NN=01)
 Country must be the full name (e.g., "Turkey", "Egypt"), NOT the country code.
 
-Exact data fields: site_id, customer, city, country, address, facility_type, dashboard_link, supervisor_1, phone_1, email_1, supervisor_2, phone_2, email_2, go_live_date, contract_status, notes
+Exact data fields: site_id, customer, city, country, address, facility_type, dashboard_link, supervisor_1, phone_1, email_1, supervisor_2, phone_2, email_2, go_live_date, contract_status, notes, whatsapp_group
 
 Do NOT use a "contacts" array — map each contact directly to supervisor_1/phone_1/email_1 and supervisor_2/phone_2/email_2.
 
 **Multi-tab extraction:** If the message also contains hardware inventory, implementation settings, or support log info alongside a new site, extract ALL of it. Return `create_site` as primary operation with site fields in `data`, and include `extra_operations` — a list of additional operations to chain. Order: update_hardware → update_implementation → log_support (only include those with data).
 
 For extra update_hardware: use entries list with device_type, qty, hw_version, fw_version, notes.
-For extra update_implementation: use exact sheet column headers as keys — "Internet connection", "Gateway placement", "Charging dock placement", "Handwash time", "Tag buzzer/vibration", "Entry time", "Tag clean-to-red timeout", "Dispenser anchor power type", "Other details".
+For extra update_implementation: use exact sheet column headers as keys — "Internet Provider" (dropdown: "ERG Controls" or "Müşteri"), "SSID", "Password", "Gateway placement", "Charging dock placement", "Dispenser anchor placement", "Handwash time", "Tag buzzer/vibration", "Entry time", "Dispenser anchor power type", "Clean hygiene time", "HP alert time", "Hand hygiene time", "Hand hygiene interval (dashboard)", "Hand hygiene type", "Tag clean-to-red timeout", "Other details".
 For extra log_support: use standard support fields (received_date, resolved_date, type, status, root_cause, issue_summary, resolution, devices_affected, responsible, notes).
 
 **Last Verified date:** For hardware and implementation data, extract a `last_verified` date if the user mentions when they last confirmed the info (e.g., "en son 2 Aralık'ta teyit ettim", "last verified December 2"). If not mentioned, omit the field — the system will default to today's date.

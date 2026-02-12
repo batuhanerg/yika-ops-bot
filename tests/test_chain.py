@@ -82,7 +82,8 @@ class TestNormalizeCreateSiteData:
             "customer": "Test",
             "country": "Turkey",
             "implementation": {
-                "Internet connection": "Customer WiFi",
+                "Internet Provider": "ERG Controls",
+                "SSID": "ERG-Net",
                 "Handwash time": "30 seconds",
             },
         }
@@ -90,7 +91,8 @@ class TestNormalizeCreateSiteData:
         assert extras is not None
         impl_ops = [e for e in extras if e["operation"] == "update_implementation"]
         assert len(impl_ops) == 1
-        assert impl_ops[0]["data"]["Internet connection"] == "Customer WiFi"
+        assert impl_ops[0]["data"]["Internet Provider"] == "ERG Controls"
+        assert impl_ops[0]["data"]["SSID"] == "ERG-Net"
         assert "implementation" not in data
         # Hardware is always included in chain
         hw_ops = [e for e in extras if e["operation"] == "update_hardware"]
@@ -170,7 +172,7 @@ class TestChainRoadmap:
         assert "2️⃣" in roadmap
         assert "3️⃣" in roadmap
         assert "4️⃣" in roadmap
-        assert "Site" in roadmap
+        assert "Saha" in roadmap
         assert "Donanım" in roadmap
         assert "Ayarlar" in roadmap
         assert "Destek" in roadmap
@@ -190,7 +192,7 @@ class TestStepIndicator:
         blocks = format_confirmation_message(data, step_info=(1, 4))
         header = blocks[0]["text"]["text"]
         assert "Adım 1/4" in header
-        assert "Yeni Site" in header
+        assert "Yeni Saha" in header
 
     def test_confirmation_without_step_info(self):
         data = {"operation": "log_support", "site_id": "ASM-TR-01"}
@@ -214,7 +216,7 @@ class TestChainFinalSummary:
         summary = build_chain_final_summary("ASM-TR-01", steps, completed, set())
         assert "ASM-TR-01" in summary
         assert "tamamlandı" in summary
-        assert "site ✅" in summary
+        assert "saha ✅" in summary
         assert "donanım ✅" in summary
         assert "ayarlar ✅" in summary
         assert "destek kaydı ✅" in summary
@@ -224,7 +226,7 @@ class TestChainFinalSummary:
         completed = {"create_site", "log_support"}
         skipped = {"update_hardware", "update_implementation"}
         summary = build_chain_final_summary("ASM-TR-01", steps, completed, skipped)
-        assert "site ✅" in summary
+        assert "saha ✅" in summary
         assert "donanım ⏭️" in summary
         assert "ayarlar ⏭️" in summary
         assert "destek kaydı ✅" in summary

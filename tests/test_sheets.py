@@ -38,6 +38,7 @@ def mock_gspread():
             "Phone 2": "",
             "Email 2": "",
             "Notes": "",
+            "WhatsApp Group": "",
         },
         {
             "Site ID": "MCD-EG-01",
@@ -56,17 +57,18 @@ def mock_gspread():
             "Phone 2": "",
             "Email 2": "",
             "Notes": "",
+            "WhatsApp Group": "",
         },
     ]
     sites_ws.get_all_values.return_value = [
         ["Site ID", "Customer", "City", "Country", "Address", "Facility Type",
          "Dashboard Link", "Supervisor 1", "Phone 1", "Email 1",
          "Supervisor 2", "Phone 2", "Email 2", "Go-live Date",
-         "Contract Status", "Notes"],
+         "Contract Status", "Notes", "WhatsApp Group"],
         ["MIG-TR-01", "Migros", "Istanbul", "Turkey", "", "Food", "", "Ahmet",
-         "", "", "", "", "", "2021-03-15", "Active", ""],
+         "", "", "", "", "", "2021-03-15", "Active", "", ""],
         ["MCD-EG-01", "McDonald's", "Cairo", "Egypt", "", "Food", "", "Omar",
-         "", "", "", "", "", "2024-11-01", "Active", ""],
+         "", "", "", "", "", "2024-11-01", "Active", "", ""],
     ]
 
     # Hardware Inventory tab
@@ -95,9 +97,9 @@ def mock_gspread():
     impl_ws = MagicMock()
     impl_ws.title = "Implementation Details"
     impl_ws.get_all_values.return_value = [
-        ["", "GENERAL", "", "", "", "", "", "", "FOOD", "", "", "", "", "HEALTHCARE", "", "OTHER", ""],
-        ["Site ID", "Internet connection", "Gateway placement", "Charging dock placement", "Dispenser anchor placement", "Handwash time", "Tag buzzer/vibration", "Entry time", "Clean hygiene time", "HP alert time", "Hand hygiene time", "Hand hygiene interval (dashboard)", "Hand hygiene type", "Tag clean-to-red timeout", "Dispenser anchor power type", "Other details", "Last Verified"],
-        ["MIG-TR-01", "Customer WiFi", "Back office", "", "", "", "", "", "", "", "", "", "", "", "", "", "2025-01-15"],
+        ["", "GENERAL", "", "", "", "", "", "", "", "", "", "FOOD", "", "", "", "", "HEALTHCARE", "OTHER", ""],
+        ["Site ID", "Internet Provider", "SSID", "Password", "Gateway placement", "Charging dock placement", "Dispenser anchor placement", "Handwash time", "Tag buzzer/vibration", "Entry time", "Dispenser anchor power type", "Clean hygiene time", "HP alert time", "Hand hygiene time", "Hand hygiene interval (dashboard)", "Hand hygiene type", "Tag clean-to-red timeout", "Other details", "Last Verified"],
+        ["MIG-TR-01", "ERG Controls", "ERG-Net", "pass123", "Back office", "", "", "", "", "", "", "", "", "", "", "", "", "", "2025-01-15"],
     ]
 
     # Stock tab
@@ -281,7 +283,7 @@ class TestCreateSite:
 class TestUpdateImplementation:
     def test_update_cell(self, sheets_service):
         service, ws = sheets_service
-        service.update_implementation("MIG-TR-01", {"Internet connection": "Fiber optic"})
+        service.update_implementation("MIG-TR-01", {"Internet Provider": "Müşteri"})
         ws["implementation"].update_cell.assert_called()
 
 

@@ -276,7 +276,7 @@ class TestLastVerifiedAutoInjection:
 
         data = {
             "site_id": "MIG-TR-01",
-            "Internet connection": "WiFi",
+            "Internet Provider": "ERG Controls",
         }
         operation = "update_implementation"
         today = date.today().isoformat()
@@ -292,7 +292,7 @@ class TestLastVerifiedAutoInjection:
 
         data = {
             "site_id": "MIG-TR-01",
-            "Internet connection": "WiFi",
+            "Internet Provider": "ERG Controls",
             "last_verified": "2025-01-01",
         }
         operation = "update_implementation"

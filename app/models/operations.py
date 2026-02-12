@@ -31,9 +31,10 @@ DEVICE_TYPES = (
     "USB Cable",
     "Other",
 )
-CONTRACT_STATUSES = ("Active", "Pending", "Expired", "Pilot")
+CONTRACT_STATUSES = ("Active", "Awaiting Installation", "Expired", "Pilot")
 STOCK_LOCATIONS = ("Istanbul Office", "Adana Storage", "Other")
 STOCK_CONDITIONS = ("New", "Refurbished", "Faulty", "Reserved")
+INTERNET_PROVIDERS = ("ERG Controls", "Müşteri")
 
 TEAM_MEMBERS = ("Batu", "Mehmet", "Gökhan", "Koray")
 
@@ -48,6 +49,7 @@ DROPDOWN_FIELDS: dict[str, tuple[str, ...]] = {
     "contract_status": CONTRACT_STATUSES,
     "stock_location": STOCK_LOCATIONS,
     "stock_condition": STOCK_CONDITIONS,
+    "internet_provider": INTERNET_PROVIDERS,
 }
 
 # --- Required fields per operation ---
