@@ -14,6 +14,7 @@
 - **Phone number formula parse error** — phone numbers starting with `+` (e.g., `+90...`) no longer cause `#ERROR!` in Google Sheets; all cell values are sanitized against formula injection (`+`, `=`, `@` prefixed with `'`)
 - **Thread dies after feedback** — after 👍/👎 + closing message, thread is properly cleared with guidance to start a new thread
 - **Chain context lost in follow-ups** — chain state (pending operations, step numbers, completed/skipped tracking) now survives through missing_fields prompts and multi-turn follow-ups in `process_message`
+- **Chain step input misclassified** — when user provides data for a chain step (e.g., hardware details at step 2), Claude could misclassify it as a different operation (e.g., `update_stock`); now forces the operation to match the chain's expected step when `awaiting_chain_input` is set
 
 ### Changed
 - `_normalize_create_site_data` always injects `update_hardware` and `update_implementation` as pending chain steps
