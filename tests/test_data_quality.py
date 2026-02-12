@@ -35,7 +35,7 @@ class TestMissingDataSites:
              "Country": "Turkey", "Facility Type": "Food",
              "Contract Status": "Active", "Supervisor 1": "Ahmet", "Phone 1": "123",
              "Address": "", "Go-live Date": "2021-03-15", "Dashboard Link": "http://x",
-             "WhatsApp Group": ""},
+             "Whatsapp Group": ""},
         ]
         result = find_missing_data(sites=sites, hardware=[], support=[], site_id="MIG-TR-01")
         addr_issues = [r for r in result if r["field"] == "Address"]
@@ -61,7 +61,7 @@ class TestMissingDataSites:
              "Country": "Turkey", "Facility Type": "Food",
              "Contract Status": "Active", "Supervisor 1": "Ahmet", "Phone 1": "123",
              "Address": "Kadıköy", "Go-live Date": "2021-03-15",
-             "Dashboard Link": "http://x", "WhatsApp Group": "https://wa.me/grp"},
+             "Dashboard Link": "http://x", "Whatsapp Group": "https://wa.me/grp"},
         ]
         hardware = [
             {"Site ID": "MIG-TR-01", "Device Type": "Tag", "Qty": 20,

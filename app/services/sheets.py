@@ -15,7 +15,7 @@ SITES_COLUMNS = [
     "Site ID", "Customer", "City", "Country", "Address", "Facility Type",
     "Dashboard Link", "Supervisor 1", "Phone 1", "Email 1",
     "Supervisor 2", "Phone 2", "Email 2", "Go-live Date",
-    "Contract Status", "Notes", "WhatsApp Group",
+    "Contract Status", "Notes", "Whatsapp Group",
 ]
 
 HARDWARE_COLUMNS = [
@@ -88,7 +88,7 @@ _SITES_KEY_MAP = {
     "go_live_date": "Go-live Date",
     "contract_status": "Contract Status",
     "notes": "Notes",
-    "whatsapp_group": "WhatsApp Group",
+    "whatsapp_group": "Whatsapp Group",
 }
 
 

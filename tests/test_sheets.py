@@ -38,7 +38,7 @@ def mock_gspread():
             "Phone 2": "",
             "Email 2": "",
             "Notes": "",
-            "WhatsApp Group": "",
+            "Whatsapp Group": "",
         },
         {
             "Site ID": "MCD-EG-01",
@@ -57,14 +57,14 @@ def mock_gspread():
             "Phone 2": "",
             "Email 2": "",
             "Notes": "",
-            "WhatsApp Group": "",
+            "Whatsapp Group": "",
         },
     ]
     sites_ws.get_all_values.return_value = [
         ["Site ID", "Customer", "City", "Country", "Address", "Facility Type",
          "Dashboard Link", "Supervisor 1", "Phone 1", "Email 1",
          "Supervisor 2", "Phone 2", "Email 2", "Go-live Date",
-         "Contract Status", "Notes", "WhatsApp Group"],
+         "Contract Status", "Notes", "Whatsapp Group"],
         ["MIG-TR-01", "Migros", "Istanbul", "Turkey", "", "Food", "", "Ahmet",
          "", "", "", "", "", "2021-03-15", "Active", "", ""],
         ["MCD-EG-01", "McDonald's", "Cairo", "Egypt", "", "Food", "", "Omar",

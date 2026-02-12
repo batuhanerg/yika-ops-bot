@@ -159,7 +159,7 @@ class TestMigrate:
                     "Site ID", "Customer", "City", "Country", "Address",
                     "Facility Type", "Dashboard Link", "Supervisor 1", "Phone 1",
                     "Email 1", "Supervisor 2", "Phone 2", "Email 2",
-                    "Go-live Date", "Contract Status", "Notes", "WhatsApp Group",
+                    "Go-live Date", "Contract Status", "Notes", "Whatsapp Group",
                 ]
             elif name == "Hardware Inventory":
                 ws.row_values.return_value = [
@@ -196,14 +196,12 @@ class TestMigrate:
         spreadsheet.worksheet.side_effect = _worksheet
         return spreadsheet
 
-    def test_clears_existing_rules(self):
-        """Should clear existing conditional formatting rules before applying."""
+    def test_applies_rules(self):
+        """Should apply conditional formatting rules via batch_update."""
         spreadsheet = self._make_spreadsheet()
 
         migrate(spreadsheet)
 
-        # batch_update should be called and should include clearBasicFilter or
-        # deleteConditionalFormatRule requests
         assert spreadsheet.batch_update.called
 
     def test_applies_rules_via_batch_update(self):

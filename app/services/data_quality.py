@@ -17,7 +17,7 @@ _SITES_FIELD_TO_COLUMN = {
     "facility_type": "Facility Type", "contract_status": "Contract Status",
     "supervisor_1": "Supervisor 1", "phone_1": "Phone 1",
     "go_live_date": "Go-live Date", "address": "Address",
-    "dashboard_link": "Dashboard Link", "whatsapp_group": "WhatsApp Group",
+    "dashboard_link": "Dashboard Link", "whatsapp_group": "Whatsapp Group",
     "email_1": "Email 1", "supervisor_2": "Supervisor 2",
     "phone_2": "Phone 2", "email_2": "Email 2", "notes": "Notes",
 }

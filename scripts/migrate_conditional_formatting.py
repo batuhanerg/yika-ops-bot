@@ -55,7 +55,7 @@ _FIELD_TO_COLUMN: dict[str, str] = {
     "facility_type": "Facility Type", "contract_status": "Contract Status",
     "supervisor_1": "Supervisor 1", "phone_1": "Phone 1",
     "go_live_date": "Go-live Date", "address": "Address",
-    "dashboard_link": "Dashboard Link", "whatsapp_group": "WhatsApp Group",
+    "dashboard_link": "Dashboard Link", "whatsapp_group": "Whatsapp Group",
     # Hardware
     "site_id": "Site ID", "device_type": "Device Type", "qty": "Qty",
     "hw_version": "HW Version", "fw_version": "FW Version",
@@ -141,11 +141,12 @@ def build_formatting_rules() -> list[dict]:
 
 
 def _find_col_index(columns: list[str], col_name: str) -> int | None:
-    """Find 0-based column index for a column name."""
-    try:
-        return columns.index(col_name)
-    except ValueError:
-        return None
+    """Find 0-based column index for a column name (case-insensitive)."""
+    col_lower = col_name.lower()
+    for i, c in enumerate(columns):
+        if c.lower() == col_lower:
+            return i
+    return None
 
 
 def _build_clear_requests(sheet_ids: dict[str, int]) -> list[dict]:
@@ -228,42 +229,15 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
     for ws in worksheets:
         sheet_ids[ws.title] = ws.id
         try:
-            sheet_headers[ws.title] = ws.row_values(1)
+            # Implementation Details has headers on row 2, others on row 1
+            header_row = 2 if ws.title == "Implementation Details" else 1
+            sheet_headers[ws.title] = ws.row_values(header_row)
         except Exception:
             sheet_headers[ws.title] = []
 
-    # Build API requests
-    requests = []
-
-    # First: clear existing conditional formatting rules for our tabs
-    for tab_name in ["Sites", "Hardware Inventory", "Implementation Details", "Support Log", "Stock"]:
-        if tab_name in sheet_ids:
-            # Delete all existing conditional format rules by sending
-            # deleteConditionalFormatRule for each existing rule.
-            # Since we don't know how many exist, we use a different approach:
-            # We'll delete rules in reverse order. For safety, delete up to 50 rules.
-            for i in range(49, -1, -1):
-                requests.append({
-                    "deleteConditionalFormatRule": {
-                        "sheetId": sheet_ids[tab_name],
-                        "index": i,
-                    }
-                })
-
-    # Apply clear requests first (ignore errors for non-existent indices)
-    if requests:
-        try:
-            spreadsheet.batch_update({"requests": requests})
-        except Exception:
-            # Some deleteConditionalFormatRule may fail if index doesn't exist
-            # Apply one by one, ignoring errors
-            for req in requests:
-                try:
-                    spreadsheet.batch_update({"requests": [req]})
-                except Exception:
-                    pass
-
-    # Now build add requests
+    # Build add requests (rules are added at index 0, so they take priority
+    # over any existing rules; running again is idempotent)
+    # Note: To fully clear existing rules, use the Google Sheets UI.
     add_requests = []
 
     for rule in rules:

@@ -24,13 +24,6 @@ SUPPORT_LOG_HEADERS = [
     "Devices Affected", "Responsible", "Notes",
 ]
 
-# Row positions in Site Viewer (these are conventional; adjust if layout differs)
-_SELECTOR_ROW = 1       # Row 1: site selector dropdown
-_SELECTOR_COL = 2       # Column B: the dropdown cell
-_SL_HEADER_ROW = 3      # Row 3: support log section headers
-_SL_DATA_ROW = 4        # Row 4: SORT(FILTER(...)) formula starts
-_SL_START_COL = 1       # Column A
-
 # Column widths in pixels
 _COLUMN_WIDTHS = {
     "Issue Summary": 320,   # ~40 chars
@@ -39,16 +32,31 @@ _COLUMN_WIDTHS = {
 }
 
 
+def _find_selector_cell(all_values: list[list[str]]) -> tuple[int, int] | None:
+    """Find the selector cell (the cell next to 'Select Site:'). Returns (row, col) 1-based."""
+    for i, row in enumerate(all_values):
+        for j, cell in enumerate(row):
+            if "Select Site" in cell or "Select site" in cell:
+                return i + 1, j + 2  # selector is the next column
+    return None
+
+
+def _find_support_log_section(all_values: list[list[str]]) -> int | None:
+    """Find the row containing the SUPPORT LOG section header. Returns 1-based row."""
+    for i, row in enumerate(all_values):
+        for cell in row:
+            if "SUPPORT LOG" in cell.upper():
+                return i + 1
+    return None
+
+
 def _build_dropdown_values(sites_data: list[list[str]]) -> list[str]:
     """Build 'Customer (Site ID)' dropdown values from sites data."""
     if len(sites_data) < 2:
         return []
-    # Row 0 = headers, rows 1+ = data
-    # Expect: col 0 = Site ID, col 1 = Customer
     headers = sites_data[0]
     site_col = 0
     customer_col = 1
-    # Try to find columns by header name
     for i, h in enumerate(headers):
         if h == "Site ID":
             site_col = i
@@ -73,7 +81,6 @@ def _build_sort_filter_formula(selected_cell: str) -> str:
     Extracts the Site ID from the selector value (format: "Customer (SITE-ID)")
     and filters Support Log by that Site ID, sorted by Received Date descending.
     """
-    # Extract Site ID from "Customer (SITE-ID)" format using REGEXEXTRACT
     site_id_extract = (
         f'REGEXEXTRACT({selected_cell},"\\(([^)]+)\\)")'
     )
@@ -85,53 +92,36 @@ def _build_sort_filter_formula(selected_cell: str) -> str:
     )
 
 
-def _set_column_widths(worksheet, header_row: int) -> None:
-    """Set column widths for key columns via batch_update on the spreadsheet."""
-    # Read headers to find column indices
-    # We use the spreadsheet's batch_update for column sizing
-    spreadsheet = worksheet.spreadsheet
-    sheet_id = worksheet.id
-
-    requests = []
-    for col_idx, header in enumerate(SUPPORT_LOG_HEADERS):
-        if header in _COLUMN_WIDTHS:
-            requests.append({
-                "updateDimensionProperties": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "dimension": "COLUMNS",
-                        "startIndex": _SL_START_COL - 1 + col_idx,
-                        "endIndex": _SL_START_COL + col_idx,
-                    },
-                    "properties": {
-                        "pixelSize": _COLUMN_WIDTHS[header],
-                    },
-                    "fields": "pixelSize",
-                }
-            })
-
-    if requests:
-        spreadsheet.batch_update({"requests": requests})
-
-
 def migrate(viewer_ws, sites_ws) -> None:
     """Update Site Viewer with improved selector, headers, sort, and widths."""
-    # 1. Build dropdown values from Sites tab
+    all_values = viewer_ws.get_all_values()
+
+    # 1. Find layout positions
+    selector_pos = _find_selector_cell(all_values)
+    sl_section_row = _find_support_log_section(all_values)
+
+    selector_row = selector_pos[0] if selector_pos else 4
+    selector_col = selector_pos[1] if selector_pos else 2
+    sl_header_row = (sl_section_row + 1) if sl_section_row else 61
+    sl_data_row = sl_header_row + 1
+
+    print(f"  Layout detected: selector at row {selector_row}/col {selector_col}, "
+          f"support log headers at row {sl_header_row}")
+
+    # 2. Build dropdown values from Sites tab
     sites_data = sites_ws.get_all_values()
     dropdown_values = _build_dropdown_values(sites_data)
 
-    # 2. Set up data validation for the selector cell
+    # 3. Set up data validation for the selector cell
     if dropdown_values:
-        from gspread.utils import ValueInputOption
-        # Use batch_update to set data validation
         validation_rule = {
             "setDataValidation": {
                 "range": {
                     "sheetId": viewer_ws.id,
-                    "startRowIndex": _SELECTOR_ROW - 1,
-                    "endRowIndex": _SELECTOR_ROW,
-                    "startColumnIndex": _SELECTOR_COL - 1,
-                    "endColumnIndex": _SELECTOR_COL,
+                    "startRowIndex": selector_row - 1,
+                    "endRowIndex": selector_row,
+                    "startColumnIndex": selector_col - 1,
+                    "endColumnIndex": selector_col,
                 },
                 "rule": {
                     "condition": {
@@ -147,23 +137,46 @@ def migrate(viewer_ws, sites_ws) -> None:
         }
         viewer_ws.spreadsheet.batch_update({"requests": [validation_rule]})
 
-    # 3. Write Support Log section headers
-    for col_offset, header in enumerate(SUPPORT_LOG_HEADERS):
-        viewer_ws.update_cell(_SL_HEADER_ROW, _SL_START_COL + col_offset, header)
+    # 4. Write Support Log section headers (batch)
+    header_row_data = [SUPPORT_LOG_HEADERS]
+    col_letter = "A"
+    end_letter = chr(ord("A") + len(SUPPORT_LOG_HEADERS) - 1)
+    range_str = f"{col_letter}{sl_header_row}:{end_letter}{sl_header_row}"
+    viewer_ws.update(values=header_row_data, range_name=range_str, value_input_option="USER_ENTERED")
 
-    # 4. Write SORT(FILTER(...)) formula for support log data
-    selector_cell = f"B{_SELECTOR_ROW}"
+    # 5. Write SORT(FILTER(...)) formula for support log data
+    selector_col_letter = chr(ord("A") + selector_col - 1)
+    selector_cell = f"{selector_col_letter}{selector_row}"
     formula = _build_sort_filter_formula(selector_cell)
-    viewer_ws.update_cell(_SL_DATA_ROW, _SL_START_COL, formula)
+    viewer_ws.update_cell(sl_data_row, 1, formula)
 
-    # 5. Set column widths
-    _set_column_widths(viewer_ws, _SL_HEADER_ROW)
+    # 6. Set column widths for support log section
+    sheet_id = viewer_ws.id
+    requests = []
+    for col_idx, header in enumerate(SUPPORT_LOG_HEADERS):
+        if header in _COLUMN_WIDTHS:
+            requests.append({
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": col_idx,
+                        "endIndex": col_idx + 1,
+                    },
+                    "properties": {
+                        "pixelSize": _COLUMN_WIDTHS[header],
+                    },
+                    "fields": "pixelSize",
+                }
+            })
+    if requests:
+        viewer_ws.spreadsheet.batch_update({"requests": requests})
 
     print("Site Viewer migration complete.")
     if dropdown_values:
         print(f"  Selector: {len(dropdown_values)} sites in 'Customer (Site ID)' format")
-    print(f"  Support Log headers: {len(SUPPORT_LOG_HEADERS)} columns")
-    print(f"  Sort: by Received Date descending")
+    print(f"  Support Log headers: {len(SUPPORT_LOG_HEADERS)} columns at row {sl_header_row}")
+    print(f"  Sort formula at row {sl_data_row}, referencing {selector_cell}")
     print(f"  Column widths: {list(_COLUMN_WIDTHS.keys())}")
 
 
