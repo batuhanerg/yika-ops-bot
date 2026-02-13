@@ -215,3 +215,54 @@ class TestFixSiteViewer:
         assert result["helper_cell"] == "D4"
         assert "formula_updates" in result
         assert "clear_range" in result
+
+    @patch("scripts.fix_site_viewer.requests")
+    def test_helper_cell_not_overwritten_on_rerun(self, mock_requests):
+        """Running twice should not create circular reference in helper cell."""
+        ws = self._make_viewer_ws()
+
+        # Simulate second run: D4 already has helper formula referencing C4
+        formulas = {
+            (3, 3): '=IFERROR(REGEXEXTRACT(C4,"\\(([^)]+)\\)"),C4)',  # D4 helper
+            (6, 2): '=IFERROR(VLOOKUP($D$4,Sites!$A:$P,2,FALSE()),"")',  # already uses $D$4
+        }
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = self._build_api_response(formulas)
+        mock_requests.get.return_value = mock_resp
+
+        fix(ws)
+
+        # D4 helper cell should be written with the correct formula (not self-referential)
+        helper_calls = [
+            call for call in ws.update_cell.call_args_list
+            if call[0][0] == 4 and call[0][1] == 4  # row 4, col D
+        ]
+        assert len(helper_calls) == 1
+        formula = helper_calls[0][0][2]
+        assert "C4" in formula, "Helper should reference C4"
+        assert "$D$4" not in formula, "Helper should NOT reference itself"
+
+    @patch("scripts.fix_site_viewer.requests")
+    def test_support_log_headers_written(self, mock_requests):
+        """Support log headers at row 61 should be written."""
+        ws = self._make_viewer_ws()
+
+        formulas = {}
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = self._build_api_response(formulas)
+        mock_requests.get.return_value = mock_resp
+
+        fix(ws)
+
+        # Check that headers were written at row 61
+        update_calls = ws.update.call_args_list
+        header_found = False
+        for call in update_calls:
+            kwargs = call.kwargs or {}
+            range_name = kwargs.get("range_name", call[0][0] if call[0] else "")
+            if "61" in str(range_name) and "A" in str(range_name):
+                values = kwargs.get("values") or call[0][1]
+                if values and len(values) > 0 and "Ticket ID" in values[0]:
+                    header_found = True
+                    assert len(values[0]) == 13, f"Expected 13 headers, got {len(values[0])}"
+        assert header_found, "Support log headers not written at row 61"

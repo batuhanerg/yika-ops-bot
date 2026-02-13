@@ -17,6 +17,8 @@ from scripts.migrate_conditional_formatting import (
     build_formatting_rules,
     migrate,
     _build_site_viewer_requests,
+    _build_device_type_version_requests,
+    _build_facility_type_conditional_requests,
     COLOR_RED,
     COLOR_YELLOW,
     COLOR_BLUE,
@@ -373,3 +375,120 @@ class TestMigrate:
                 assert bg == COLOR_RED, f"Row {row} should be red"
             else:
                 assert bg == COLOR_YELLOW, f"Row {row} should be yellow"
+
+    def test_device_type_version_rules_for_tag_anchor(self):
+        """HW/FW Version should be red when Device Type is Tag or Anchor."""
+        headers = ["Site ID", "Device Type", "HW Version", "FW Version", "Qty", "Last Verified", "Notes"]
+        rules = _build_device_type_version_requests(sheet_id=1, headers=headers, header_row=1)
+        assert len(rules) == 2, f"Expected 2 rules (HW + FW), got {len(rules)}"
+        for rule in rules:
+            formula = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+            assert "Tag" in formula, f"Formula should check for Tag: {formula}"
+            assert "Anchor" in formula, f"Formula should check for Anchor: {formula}"
+            bg = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["backgroundColor"]
+            assert bg == COLOR_RED, "Device type version rules should be red"
+
+    def test_device_type_version_rules_in_migrate(self):
+        """migrate() should include Tag/Anchor version rules."""
+        spreadsheet = self._make_spreadsheet()
+
+        migrate(spreadsheet)
+
+        all_calls = spreadsheet.batch_update.call_args_list
+        all_requests = []
+        for c in all_calls:
+            body = c[0][0] if c[0] else c[1].get("body", {})
+            all_requests.extend(body.get("requests", []))
+
+        add_rules = [r for r in all_requests if "addConditionalFormatRule" in r]
+        # Find Hardware Inventory rules (sheet_id=1) with Tag/Anchor in formula
+        tag_rules = [
+            r for r in add_rules
+            if r["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"] == 1
+            and "Tag" in r["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+        ]
+        assert len(tag_rules) == 2, f"Expected 2 Tag/Anchor version rules, got {len(tag_rules)}"
+
+    def test_facility_type_conditional_rules(self):
+        """Food/Healthcare-specific fields should get yellow formatting."""
+        impl_headers = [
+            "Site ID", "Internet Provider", "SSID", "Password",
+            "Gateway Placement", "Charging Dock Placement",
+            "Clean Hygiene Time", "HP Alert Time", "Hand Hygiene Time",
+            "Hand Hygiene Interval", "Hand Hygiene Type", "Tag Clean to Red Timeout",
+            "_FacilityType",
+        ]
+        # _FacilityType helper column is at index 12
+        rules = _build_facility_type_conditional_requests(
+            sheet_id=2, impl_headers=impl_headers,
+            facility_type_col_idx=12, header_row=2,
+        )
+        # Food has 5 fields, Healthcare has 1 = 6 total
+        assert len(rules) == 6, f"Expected 6 facility-type rules, got {len(rules)}"
+        for rule in rules:
+            formula = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+            # Should reference the local helper column (M), not cross-sheet VLOOKUP
+            assert "$M" in formula, f"Should reference helper column $M: {formula}"
+            assert "VLOOKUP" not in formula, f"Should NOT use VLOOKUP in formula: {formula}"
+            bg = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["backgroundColor"]
+            assert bg == COLOR_YELLOW, "Facility-type rules should be yellow"
+
+    def test_facility_type_food_checks_correct_type(self):
+        """Food rules should check for 'Food' facility type."""
+        impl_headers = [
+            "Site ID", "Internet Provider", "SSID", "Clean Hygiene Time",
+            "_FacilityType",
+        ]
+        # _FacilityType is at index 4
+        rules = _build_facility_type_conditional_requests(
+            sheet_id=2, impl_headers=impl_headers,
+            facility_type_col_idx=4, header_row=2,
+        )
+        food_rules = [
+            r for r in rules
+            if '"Food"' in r["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+        ]
+        assert len(food_rules) > 0, "Should have Food-specific rules"
+
+    def test_stale_verified_includes_empty_cells(self):
+        """Last Verified rule should highlight empty cells (not just old dates)."""
+        spreadsheet = self._make_spreadsheet()
+
+        migrate(spreadsheet)
+
+        all_calls = spreadsheet.batch_update.call_args_list
+        all_requests = []
+        for c in all_calls:
+            body = c[0][0] if c[0] else c[1].get("body", {})
+            all_requests.extend(body.get("requests", []))
+
+        add_rules = [r for r in all_requests if "addConditionalFormatRule" in r]
+        # Find blue rules for Hardware Inventory (sheet_id=1)
+        blue_rules = [
+            r for r in add_rules
+            if r["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"] == 1
+            and r["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["backgroundColor"] == COLOR_BLUE
+        ]
+        assert len(blue_rules) > 0, "Should have stale_verified blue rule"
+        formula = blue_rules[0]["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+        # The formula should NOT require the cell to be non-empty
+        assert '<>""' not in formula or formula.count('<>""') == 1, (
+            f"Stale verified formula should not exclude empty cells: {formula}"
+        )
+
+    def test_build_rules_includes_device_type_must(self):
+        """build_formatting_rules should include device_type_must entries."""
+        rules = build_formatting_rules()
+        dt_rules = [r for r in rules if r["severity"] == "device_type_must"]
+        assert len(dt_rules) == 2
+        fields = {r["field"] for r in dt_rules}
+        assert "HW Version" in fields
+        assert "FW Version" in fields
+
+    def test_build_rules_includes_facility_type(self):
+        """build_formatting_rules should include facility-type entries."""
+        rules = build_formatting_rules()
+        food_rules = [r for r in rules if r["severity"] == "facility_food"]
+        healthcare_rules = [r for r in rules if r["severity"] == "facility_healthcare"]
+        assert len(food_rules) == 5
+        assert len(healthcare_rules) == 1

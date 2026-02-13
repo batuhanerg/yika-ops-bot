@@ -122,7 +122,7 @@ def build_formatting_rules() -> list[dict]:
                 "color": COLOR_YELLOW,
             })
 
-    # Special rules: Last Verified > 30 days → blue
+    # Special rules: Last Verified empty or > 30 days → blue
     for tab_name in ["Hardware Inventory"]:
         rules.append({
             "tab": tab_name,
@@ -138,6 +138,30 @@ def build_formatting_rules() -> list[dict]:
         "severity": "stale_ticket",
         "color": COLOR_ORANGE,
     })
+
+    # Device type conditional: Tag/Anchor → red for HW/FW Version
+    for field in ["hw_version", "fw_version"]:
+        col_name = _FIELD_TO_COLUMN.get(field, field)
+        rules.append({
+            "tab": "Hardware Inventory",
+            "field": col_name,
+            "severity": "device_type_must",
+            "color": COLOR_RED,
+        })
+
+    # Facility type conditional: Food/Healthcare → yellow for specific fields
+    facility_rules = FIELD_REQUIREMENTS.get("implementation_details", {}).get(
+        "must_when_facility_type", {}
+    )
+    for facility_type, fields in facility_rules.items():
+        for field in fields:
+            col_name = _FIELD_TO_COLUMN.get(field, field)
+            rules.append({
+                "tab": "Implementation Details",
+                "field": col_name,
+                "severity": f"facility_{facility_type.lower()}",
+                "color": COLOR_YELLOW,
+            })
 
     return rules
 
@@ -259,6 +283,153 @@ def _build_site_viewer_requests(sheet_id: int) -> list[dict]:
                 "index": 0,
             }
         })
+
+    return add_requests
+
+
+def _build_device_type_version_requests(
+    sheet_id: int,
+    headers: list[str],
+    header_row: int = 1,
+) -> list[dict]:
+    """Build conditional formatting: red for HW/FW Version when Device Type is Tag or Anchor."""
+    device_type_idx = _find_col_index(headers, "Device Type")
+    hw_idx = _find_col_index(headers, "HW Version")
+    fw_idx = _find_col_index(headers, "FW Version")
+
+    if device_type_idx is None:
+        return []
+
+    add_requests = []
+    data_row = header_row + 1
+    dt_letter = chr(ord("A") + device_type_idx)
+
+    for ver_idx in [hw_idx, fw_idx]:
+        if ver_idx is None:
+            continue
+        ver_letter = chr(ord("A") + ver_idx)
+        formula = (
+            f'=AND($A{data_row}<>"",'
+            f'OR(${dt_letter}{data_row}="Tag",${dt_letter}{data_row}="Anchor"),'
+            f'{ver_letter}{data_row}="")'
+        )
+        add_requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sheet_id,
+                        "startRowIndex": header_row,
+                        "startColumnIndex": ver_idx,
+                        "endColumnIndex": ver_idx + 1,
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": formula}],
+                        },
+                        "format": {"backgroundColor": COLOR_RED},
+                    },
+                },
+                "index": 0,
+            }
+        })
+
+    return add_requests
+
+
+def _setup_facility_type_helper(spreadsheet, impl_headers, sites_headers):
+    """Add a _FacilityType helper column to Implementation Details.
+
+    Writes an ARRAYFORMULA that VLOOKUPs each row's Site ID → Facility Type
+    from the Sites tab. This is needed because Google Sheets API does not
+    support cross-sheet references in conditional formatting formulas.
+
+    Returns the 0-based column index of the helper column, or None.
+    """
+    ft_idx = _find_col_index(sites_headers, "Facility Type")
+    if ft_idx is None:
+        return None
+
+    # Check if helper column already exists
+    helper_name = "_FacilityType"
+    existing_idx = _find_col_index(impl_headers, helper_name)
+    if existing_idx is not None:
+        return existing_idx
+
+    helper_idx = len(impl_headers)
+    ft_col_letter = chr(ord("A") + ft_idx)
+    vlookup_col = ft_idx + 1
+
+    try:
+        ws = spreadsheet.worksheet("Implementation Details")
+        # Write header at row 2
+        ws.update_cell(2, helper_idx + 1, helper_name)
+        # Write ARRAYFORMULA at row 3 (first data row)
+        formula = (
+            f'=ARRAYFORMULA(IF(A3:A="","",IFERROR(VLOOKUP(A3:A,'
+            f"Sites!$A:${ft_col_letter},{vlookup_col},FALSE)" ',"")))'
+        )
+        ws.update_cell(3, helper_idx + 1, formula)
+        print(f"  Implementation Details: added _FacilityType helper column at {chr(ord('A') + helper_idx)}")
+        return helper_idx
+    except Exception as e:
+        print(f"  WARNING: Could not add facility type helper column ({e})")
+        return None
+
+
+def _build_facility_type_conditional_requests(
+    sheet_id: int,
+    impl_headers: list[str],
+    facility_type_col_idx: int,
+    header_row: int = 2,
+) -> list[dict]:
+    """Build conditional formatting for facility-type-specific Implementation Details fields.
+
+    References the local _FacilityType helper column (not cross-sheet VLOOKUP).
+    Food-specific and Healthcare-specific fields get yellow (important) highlighting.
+    """
+    add_requests = []
+    data_row = header_row + 1  # Row 3 for Implementation Details
+    ft_letter = chr(ord("A") + facility_type_col_idx)
+
+    facility_rules = FIELD_REQUIREMENTS.get("implementation_details", {}).get(
+        "must_when_facility_type", {}
+    )
+
+    for facility_type, fields in facility_rules.items():
+        for field in fields:
+            col_name = _FIELD_TO_COLUMN.get(field, field)
+            col_idx = _find_col_index(impl_headers, col_name)
+            if col_idx is None:
+                print(f"  WARNING: Column '{col_name}' not found in Implementation Details")
+                continue
+
+            col_letter = chr(ord("A") + col_idx)
+            formula = (
+                f'=AND($A{data_row}<>"",'
+                f'${ft_letter}{data_row}="{facility_type}",'
+                f'{col_letter}{data_row}="")'
+            )
+            add_requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": sheet_id,
+                            "startRowIndex": header_row,
+                            "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1,
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue": formula}],
+                            },
+                            "format": {"backgroundColor": COLOR_YELLOW},
+                        },
+                    },
+                    "index": 0,
+                }
+            })
 
     return add_requests
 
@@ -390,10 +561,12 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
                 )
             )
         elif severity == "stale_verified":
-            # Last Verified > 30 days ago → blue
+            # Last Verified empty or > 30 days ago → blue
+            # Empty cells are treated as 0 by Sheets, so TODAY()-0 > 30 is
+            # always true — just removing the <>"" guard handles both cases.
             data_row = hdr_row + 1
             col_letter = chr(ord("A") + col_idx)
-            formula = f'=AND({col_letter}{data_row}<>"",TODAY()-{col_letter}{data_row}>30)'
+            formula = f'=TODAY()-{col_letter}{data_row}>30'
             add_requests.append(
                 _build_add_rule_request(
                     sid, col_idx, color, rule_type="custom",
@@ -422,6 +595,37 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
         viewer_rules = _build_site_viewer_requests(sheet_ids["Site Viewer"])
         add_requests.extend(viewer_rules)
         print(f"  Site Viewer: {len(viewer_rules)} formatting rules (must=red, important=yellow)")
+
+    # Device type conditional: Tag/Anchor → red for HW/FW Version
+    if "Hardware Inventory" in sheet_ids:
+        hw_rules = _build_device_type_version_requests(
+            sheet_ids["Hardware Inventory"],
+            sheet_headers.get("Hardware Inventory", []),
+            header_row=1,
+        )
+        add_requests.extend(hw_rules)
+        if hw_rules:
+            print(f"  Hardware Inventory: {len(hw_rules)} device-type version rules (Tag/Anchor)")
+
+    # Facility type conditional: Food/Healthcare → yellow for specific fields
+    # Uses a local _FacilityType helper column (cross-sheet refs not supported
+    # in conditional formatting API)
+    if "Implementation Details" in sheet_ids and "Sites" in sheet_ids:
+        ft_helper_idx = _setup_facility_type_helper(
+            spreadsheet,
+            sheet_headers.get("Implementation Details", []),
+            sheet_headers.get("Sites", []),
+        )
+        if ft_helper_idx is not None:
+            ft_rules = _build_facility_type_conditional_requests(
+                sheet_ids["Implementation Details"],
+                sheet_headers.get("Implementation Details", []),
+                facility_type_col_idx=ft_helper_idx,
+                header_row=2,
+            )
+            add_requests.extend(ft_rules)
+            if ft_rules:
+                print(f"  Implementation Details: {len(ft_rules)} facility-type rules (Food/Healthcare)")
 
     # Apply all add requests in one batch
     if add_requests:

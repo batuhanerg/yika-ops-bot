@@ -112,6 +112,9 @@ def fix(viewer_ws, dry_run: bool = False) -> dict:
     for i, row in enumerate(rows_data):
         values = row.get("values", [])
         for j, val in enumerate(values):
+            # Skip the helper cell itself to prevent circular reference
+            if i + 1 == selector_row and j + 1 == helper_col:
+                continue
             uev = val.get("userEnteredValue", {})
             formula = uev.get("formulaValue")
             if formula and old_ref in formula:
@@ -123,6 +126,9 @@ def fix(viewer_ws, dry_run: bool = False) -> dict:
     for i, row in enumerate(rows_data):
         values = row.get("values", [])
         for j, val in enumerate(values):
+            # Skip the helper cell itself to prevent circular reference
+            if i + 1 == selector_row and j + 1 == helper_col:
+                continue
             uev = val.get("userEnteredValue", {})
             formula = uev.get("formulaValue")
             if formula and selector_cell_ref in formula and old_ref not in formula:
@@ -191,11 +197,24 @@ def fix(viewer_ws, dry_run: bool = False) -> dict:
     )
     print(f"  Cleared support log spill area: {clear_range}")
 
-    # 7c. Update the SORT formula to use helper cell
+    # 7c. Re-write support log headers to match SORT output columns
+    sl_headers = [
+        "Ticket ID", "Site ID", "Received Date", "Resolved Date", "Type",
+        "Status", "Root Cause", "Reported By", "Issue Summary", "Resolution",
+        "Devices Affected", "Responsible", "Notes",
+    ]
+    viewer_ws.update(
+        values=[sl_headers],
+        range_name=f"A{sl_header_row}:M{sl_header_row}",
+        value_input_option="USER_ENTERED",
+    )
+    print(f"  Written support log headers at row {sl_header_row}")
+
+    # 7d. Update the SORT formula to use helper cell
     viewer_ws.update_cell(sl_data_row, 1, sort_formula)
     print(f"  Updated SORT formula at A{sl_data_row}")
 
-    # 7d. Update all other formulas that referenced $C$4
+    # 7e. Update all other formulas that referenced $C$4
     # Batch update: group by contiguous ranges where possible
     # Use individual update_cell calls (there are ~60 formulas)
     # To stay under rate limits, batch into a single batch_update
