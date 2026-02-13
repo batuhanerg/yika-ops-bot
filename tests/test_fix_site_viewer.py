@@ -139,18 +139,18 @@ class TestFixSiteViewer:
 
         fix(ws)
 
-        # The update call should clear B62-M81 with empty values
+        # The update call should clear B62:M81 (full 20-row range)
         update_calls = ws.update.call_args_list
         clear_found = False
         for call in update_calls:
             kwargs = call.kwargs or {}
             range_name = kwargs.get("range_name", call[0][0] if call[0] else "")
-            if "B62" in str(range_name):
+            if "B62" in str(range_name) and "M81" in str(range_name):
                 clear_found = True
                 values = kwargs.get("values") or call[0][1]
-                # Should be empty strings
+                assert len(values) == 20, f"Expected 20 rows, got {len(values)}"
                 assert all(cell == "" for row in values for cell in row)
-        assert clear_found, "Support log spill area not cleared"
+        assert clear_found, "Support log spill area B62:M81 not cleared"
 
     @patch("scripts.fix_site_viewer.requests")
     def test_sort_formula_uses_helper_cell(self, mock_requests):
@@ -214,4 +214,4 @@ class TestFixSiteViewer:
         assert "helper_cell" in result
         assert result["helper_cell"] == "D4"
         assert "formula_updates" in result
-        assert "cells_cleared" in result
+        assert "clear_range" in result

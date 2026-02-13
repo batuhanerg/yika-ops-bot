@@ -140,18 +140,11 @@ def fix(viewer_ws, dry_run: bool = False) -> dict:
                 if not any(u[0] == i + 1 and u[1] == j + 1 for u in formula_updates):
                     formula_updates.append((i + 1, j + 1, new_formula))
 
-    # 4. Identify support log cells to clear (B-M in the data rows)
+    # 4. Always clear the full support log spill area (B-M, 20 rows)
     # The SORT formula in column A spills across all columns, so clear B onward
-    sl_data_end_row = min(sl_data_row + 19, len(all_values))  # up to 20 rows
-    cells_to_clear = []
-    for r in range(sl_data_row, sl_data_end_row + 1):
-        row_idx = r - 1
-        if row_idx < len(rows_data):
-            values = rows_data[row_idx].get("values", [])
-            for j in range(1, min(len(values), 13)):  # columns B through M
-                uev = values[j].get("userEnteredValue", {})
-                if uev.get("formulaValue"):
-                    cells_to_clear.append((r, j + 1))
+    # We clear unconditionally because get_all_values() may not return rows
+    # that only contain formulas (e.g., rows 63-81 with INDEX/FILTER).
+    sl_data_end_row = sl_data_row + 19  # always 20 rows
 
     # 5. Build the helper cell formula
     helper_formula = f'=IFERROR(REGEXEXTRACT({selector_letter}{selector_row},"\\(([^)]+)\\)"),{selector_letter}{selector_row})'
@@ -164,16 +157,18 @@ def fix(viewer_ws, dry_run: bool = False) -> dict:
         f"),3,FALSE),)"
     )
 
+    clear_range = f"B{sl_data_row}:M{sl_data_end_row}"
+
     summary = {
         "helper_cell": f"{helper_letter}{selector_row}",
         "helper_formula": helper_formula,
         "formula_updates": len(formula_updates),
-        "cells_cleared": len(cells_to_clear),
+        "clear_range": clear_range,
         "sort_formula_cell": f"A{sl_data_row}",
     }
 
     print(f"\n  Formula updates: {len(formula_updates)}")
-    print(f"  Cells to clear (support log spill): {len(cells_to_clear)}")
+    print(f"  Support log clear range: {clear_range}")
 
     if dry_run:
         print("\n  [DRY RUN] No changes applied.")
@@ -187,17 +182,14 @@ def fix(viewer_ws, dry_run: bool = False) -> dict:
     viewer_ws.update_cell(selector_row, helper_col, helper_formula)
     print(f"  Written helper cell: {helper_letter}{selector_row}")
 
-    # 7b. Clear the support log spill area (batch)
-    if cells_to_clear:
-        # Clear all formula cells in the support log data area
-        clear_range = f"B{sl_data_row}:M{sl_data_end_row}"
-        empty_rows = [[""] * 12 for _ in range(sl_data_end_row - sl_data_row + 1)]
-        viewer_ws.update(
-            values=empty_rows,
-            range_name=clear_range,
-            value_input_option="USER_ENTERED",
-        )
-        print(f"  Cleared support log spill area: {clear_range}")
+    # 7b. Clear the full support log spill area (20 rows × 12 columns)
+    empty_rows = [[""] * 12 for _ in range(sl_data_end_row - sl_data_row + 1)]
+    viewer_ws.update(
+        values=empty_rows,
+        range_name=clear_range,
+        value_input_option="USER_ENTERED",
+    )
+    print(f"  Cleared support log spill area: {clear_range}")
 
     # 7c. Update the SORT formula to use helper cell
     viewer_ws.update_cell(sl_data_row, 1, sort_formula)

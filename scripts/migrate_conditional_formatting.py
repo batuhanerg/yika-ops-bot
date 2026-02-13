@@ -21,6 +21,8 @@ import json
 import os
 import sys
 
+import requests as http_requests
+
 from app.field_config.field_requirements import FIELD_REQUIREMENTS
 from app.services.sheets import (
     SITES_COLUMNS,
@@ -149,19 +151,116 @@ def _find_col_index(columns: list[str], col_name: str) -> int | None:
     return None
 
 
-def _build_clear_requests(sheet_ids: dict[str, int]) -> list[dict]:
-    """Build requests to clear all existing conditional format rules."""
-    requests = []
-    for sheet_name, sheet_id in sheet_ids.items():
-        # We clear by adding a deleteConditionalFormatRule for index 0
-        # repeatedly, but simpler: use updateSheetProperties or batch clear
-        # Actually, we'll use a different approach: delete all rules
-        # Google Sheets API doesn't have a "clear all" — we need to know
-        # how many rules exist. Instead, we'll just add our rules with index 0
-        # which pushes them to the top. The clear approach is handled
-        # by the caller reading existing rules first.
-        pass
-    return requests
+def _delete_existing_rules(spreadsheet) -> int:
+    """Delete all existing conditional formatting rules from all sheets.
+
+    Uses the Sheets API to discover rule counts, then deletes from
+    highest index to lowest so indices don't shift.
+
+    Returns the number of rules deleted.
+    """
+    try:
+        from google.auth.transport.requests import Request
+        creds = spreadsheet.client.auth
+        if hasattr(creds, "refresh"):
+            creds.refresh(Request())
+
+        resp = http_requests.get(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet.id}",
+            params={"fields": "sheets(properties.sheetId,conditionalFormats)"},
+            headers={"Authorization": f"Bearer {creds.token}"},
+        )
+        if resp.status_code != 200:
+            print(f"  WARNING: Could not fetch existing rules (HTTP {resp.status_code})")
+            return 0
+
+        data = resp.json()
+    except Exception as e:
+        print(f"  WARNING: Could not fetch existing rules ({e})")
+        return 0
+
+    delete_requests = []
+    for sheet in data.get("sheets", []):
+        sid = sheet.get("properties", {}).get("sheetId")
+        if sid is None:
+            continue
+        formats = sheet.get("conditionalFormats", [])
+        # Delete from highest index to lowest
+        for i in range(len(formats) - 1, -1, -1):
+            delete_requests.append({
+                "deleteConditionalFormatRule": {
+                    "sheetId": sid,
+                    "index": i,
+                }
+            })
+
+    if delete_requests:
+        spreadsheet.batch_update({"requests": delete_requests})
+
+    return len(delete_requests)
+
+
+# Site Viewer layout: site info fields in column C
+# Must fields → red, Important fields → yellow (only when a site is selected)
+_SITE_VIEWER_MUST_ROWS = [7, 8, 9, 11, 13, 14, 20]  # Customer,City,Country,Facility,Sup1,Phone1,Contract
+_SITE_VIEWER_IMPORTANT_ROWS = [10, 12, 19]  # Address, Dashboard Link, Go-live Date
+
+
+def _build_site_viewer_requests(sheet_id: int) -> list[dict]:
+    """Build conditional formatting requests for Site Viewer site info section."""
+    add_requests = []
+    helper_ref = "$D$4"  # Extracted Site ID
+    col_c = 2  # 0-based column index for column C
+
+    for row in _SITE_VIEWER_MUST_ROWS:
+        formula = f'=AND({helper_ref}<>"",C{row}="")'
+        add_requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sheet_id,
+                        "startRowIndex": row - 1,
+                        "endRowIndex": row,
+                        "startColumnIndex": col_c,
+                        "endColumnIndex": col_c + 1,
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": formula}],
+                        },
+                        "format": {"backgroundColor": COLOR_RED},
+                    },
+                },
+                "index": 0,
+            }
+        })
+
+    for row in _SITE_VIEWER_IMPORTANT_ROWS:
+        formula = f'=AND({helper_ref}<>"",C{row}="")'
+        add_requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sheet_id,
+                        "startRowIndex": row - 1,
+                        "endRowIndex": row,
+                        "startColumnIndex": col_c,
+                        "endColumnIndex": col_c + 1,
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": formula}],
+                        },
+                        "format": {"backgroundColor": COLOR_YELLOW},
+                    },
+                },
+                "index": 0,
+            }
+        })
+
+    return add_requests
 
 
 def _build_add_rule_request(
@@ -248,9 +347,12 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
         except Exception:
             sheet_headers[ws.title] = []
 
-    # Build add requests (rules are added at index 0, so they take priority
-    # over any existing rules; running again is idempotent)
-    # Note: To fully clear existing rules, use the Google Sheets UI.
+    # Delete all existing conditional formatting rules first (idempotent)
+    deleted = _delete_existing_rules(spreadsheet)
+    if deleted:
+        print(f"Deleted {deleted} existing conditional formatting rules.")
+
+    # Build add requests
     add_requests = []
 
     # Determine the header row and first column letter for each tab
@@ -315,7 +417,13 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
                     )
                 )
 
-    # Apply add requests
+    # Add Site Viewer conditional formatting (red/yellow for site info)
+    if "Site Viewer" in sheet_ids:
+        viewer_rules = _build_site_viewer_requests(sheet_ids["Site Viewer"])
+        add_requests.extend(viewer_rules)
+        print(f"  Site Viewer: {len(viewer_rules)} formatting rules (must=red, important=yellow)")
+
+    # Apply all add requests in one batch
     if add_requests:
         spreadsheet.batch_update({"requests": add_requests})
         print(f"Applied {len(add_requests)} conditional formatting rules.")

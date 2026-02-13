@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch, call
 from scripts.migrate_conditional_formatting import (
     build_formatting_rules,
     migrate,
+    _build_site_viewer_requests,
     COLOR_RED,
     COLOR_YELLOW,
     COLOR_BLUE,
@@ -146,6 +147,7 @@ class TestMigrate:
                 "Implementation Details": 2,
                 "Support Log": 3,
                 "Stock": 4,
+                "Site Viewer": 5,
             }
 
         worksheets = []
@@ -183,6 +185,8 @@ class TestMigrate:
                     "Site ID", "Internet Provider", "SSID", "Password",
                     "Gateway Placement", "Charging Dock Placement",
                 ]
+            elif name == "Site Viewer":
+                ws.row_values.return_value = []  # No data headers to read
             worksheets.append(ws)
 
         spreadsheet.worksheets.return_value = worksheets
@@ -298,8 +302,12 @@ class TestMigrate:
             bool_rule = rule["addConditionalFormatRule"]["rule"]["booleanRule"]
             condition = bool_rule["condition"]
             formula = condition["values"][0]["userEnteredValue"]
-            # Every formula should contain $A (the first column guard)
-            assert "$A" in formula, f"Missing first-column guard in: {formula}"
+            # Site Viewer rules (sheet_id=5) use $D$4 as guard instead of $A
+            sheet_id = rule["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"]
+            if sheet_id == 5:
+                assert "$D$4" in formula, f"Missing helper cell guard in: {formula}"
+            else:
+                assert "$A" in formula, f"Missing first-column guard in: {formula}"
 
     def test_impl_details_header_row_2(self):
         """Implementation Details should use header_row=2 (startRowIndex=2)."""
@@ -326,3 +334,42 @@ class TestMigrate:
             # Formula should reference row 3 (first data row after header on row 2)
             formula = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
             assert "3" in formula, f"Impl Details formula should reference row 3: {formula}"
+
+    def test_site_viewer_rules_included(self):
+        """Site Viewer should get red/yellow formatting for site info cells."""
+        spreadsheet = self._make_spreadsheet()
+
+        migrate(spreadsheet)
+
+        all_calls = spreadsheet.batch_update.call_args_list
+        all_requests = []
+        for c in all_calls:
+            body = c[0][0] if c[0] else c[1].get("body", {})
+            all_requests.extend(body.get("requests", []))
+
+        add_rules = [r for r in all_requests if "addConditionalFormatRule" in r]
+        # Find rules for Site Viewer (sheet_id=5)
+        viewer_rules = [
+            r for r in add_rules
+            if r["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"] == 5
+        ]
+        assert len(viewer_rules) == 10, f"Expected 10 Site Viewer rules, got {len(viewer_rules)}"
+
+    def test_site_viewer_rules_check_helper_cell(self):
+        """Site Viewer rules should reference $D$4 (the helper cell)."""
+        viewer_rules = _build_site_viewer_requests(sheet_id=5)
+        for rule in viewer_rules:
+            formula = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+            assert "$D$4" in formula, f"Missing helper cell ref in: {formula}"
+
+    def test_site_viewer_must_rows_use_red(self):
+        """Site Viewer must-field rows should use red background."""
+        viewer_rules = _build_site_viewer_requests(sheet_id=5)
+        must_rows = {7, 8, 9, 11, 13, 14, 20}
+        for rule in viewer_rules:
+            row = rule["addConditionalFormatRule"]["rule"]["ranges"][0]["startRowIndex"] + 1
+            bg = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["backgroundColor"]
+            if row in must_rows:
+                assert bg == COLOR_RED, f"Row {row} should be red"
+            else:
+                assert bg == COLOR_YELLOW, f"Row {row} should be yellow"
