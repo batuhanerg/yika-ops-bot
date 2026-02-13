@@ -148,11 +148,13 @@ def process_message(
 
     # Inject chain context into message so Claude knows the site and expected operation
     parse_text = text
-    if existing_state and existing_state.get("awaiting_chain_input"):
+    is_chain_input = bool(existing_state and existing_state.get("awaiting_chain_input"))
+    if is_chain_input:
         chain_site_id = existing_state.get("data", {}).get("site_id", "")
         chain_op = existing_state.get("operation", "")
         if chain_site_id:
             parse_text = f"[Site: {chain_site_id}] [Operation: {chain_op}]\n{text}"
+        logger.info("Chain input: site=%s op=%s text=%s", chain_site_id, chain_op, text[:80])
 
     # Parse with Claude
     try:
@@ -272,10 +274,14 @@ def process_message(
 
     # Enforce FIELD_REQUIREMENTS must fields (catches fields Claude missed)
     facility_type = result.data.get("facility_type")
+    if is_chain_input:
+        logger.info("Chain pre-enforce: op=%s data_keys=%s missing=%s", result.operation, list(result.data.keys()), result.missing_fields)
     result.missing_fields = enforce_must_fields(
         result.operation, result.data, result.missing_fields,
         facility_type=facility_type,
     )
+    if is_chain_input:
+        logger.info("Chain post-enforce: missing=%s", result.missing_fields)
 
     # Build conversation history for multi-turn context
     messages = thread_context or []

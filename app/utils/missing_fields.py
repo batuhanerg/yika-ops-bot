@@ -123,8 +123,17 @@ def enforce_must_fields(
     # Start from Claude's list but remove fields that are actually present in data
     missing: list[str] = [f for f in claude_missing if not data.get(f)]
 
+    # For bulk hardware, entries list satisfies device_type and qty
+    entries = data.get("entries")
+    entries_satisfy: set[str] = set()
+    if operation == "update_hardware" and isinstance(entries, list) and entries:
+        entries_satisfy = {"device_type", "qty"}
+        missing = [f for f in missing if f not in entries_satisfy]
+
     # Check must fields
     for field in req.get("must", []):
+        if field in entries_satisfy:
+            continue
         if not data.get(field) and field not in missing:
             missing.append(field)
 

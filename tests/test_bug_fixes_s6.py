@@ -28,6 +28,38 @@ class TestBug1ChainSiteIdContext:
         missing = enforce_must_fields("update_implementation", data, [])
         assert "site_id" not in missing
 
+    def test_bulk_hardware_entries_satisfy_device_type_qty(self):
+        """Bulk hardware with entries list should not flag device_type/qty as missing."""
+        data = {
+            "site_id": "TST-TR-01",
+            "entries": [
+                {"device_type": "Tag", "qty": 10},
+                {"device_type": "Anchor", "qty": 15},
+                {"device_type": "Gateway", "qty": 1},
+            ],
+        }
+        missing = enforce_must_fields("update_hardware", data, [])
+        assert "device_type" not in missing
+        assert "qty" not in missing
+        assert "site_id" not in missing
+
+    def test_bulk_hardware_entries_from_claude_missing(self):
+        """Even if Claude reports device_type/qty missing, entries should override."""
+        data = {
+            "site_id": "TST-TR-01",
+            "entries": [{"device_type": "Tag", "qty": 10}],
+        }
+        missing = enforce_must_fields("update_hardware", data, ["device_type", "qty"])
+        assert "device_type" not in missing
+        assert "qty" not in missing
+
+    def test_empty_entries_still_flags_device_type_qty(self):
+        """Empty entries list should still flag device_type/qty as missing."""
+        data = {"site_id": "TST-TR-01", "entries": []}
+        missing = enforce_must_fields("update_hardware", data, [])
+        assert "device_type" in missing
+        assert "qty" in missing
+
     def test_chain_prompt_excludes_site_id(self):
         """format_chain_input_prompt() should not list site_id in must fields."""
         blocks = format_chain_input_prompt(2, 4, "update_hardware")
