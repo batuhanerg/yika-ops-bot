@@ -169,6 +169,26 @@ class TestRequiredFields:
         assert "country" in missing
         assert "facility_type" in missing
 
+    def test_create_site_go_live_date_not_required(self):
+        """go_live_date is important, not must — should not be in REQUIRED_FIELDS."""
+        data = {
+            "customer": "Test Corp", "city": "Istanbul", "country": "Turkey",
+            "facility_type": "Food", "contract_status": "Active",
+            "supervisor_1": "Ahmet", "phone_1": "555",
+        }
+        missing = validate_required_fields("create_site", data)
+        assert "go_live_date" not in missing
+
+    def test_create_site_supervisor_phone_required(self):
+        """supervisor_1 and phone_1 are must fields for create_site."""
+        data = {
+            "customer": "Test Corp", "city": "Istanbul", "country": "Turkey",
+            "facility_type": "Food", "contract_status": "Active",
+        }
+        missing = validate_required_fields("create_site", data)
+        assert "supervisor_1" in missing
+        assert "phone_1" in missing
+
 
 # --- Dropdown validation ---
 

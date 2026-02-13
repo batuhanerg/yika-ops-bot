@@ -93,7 +93,7 @@ Multiple devices → entries list: `{"entries": [{"device_type": "Tag", "qty": 3
 - **log_support**: site_id, received_date, type, status, issue_summary, responsible
   - If status ≠ "Open": also root_cause
   - If status = "Resolved": also resolved_date, resolution
-- **create_site**: customer, city, country, facility_type, go_live_date, contract_status
+- **create_site**: customer, city, country, facility_type, contract_status, supervisor_1, phone_1
 - **update_hardware**: site_id, entries (each with device_type, qty)
 - **query**: query_type
 
@@ -108,3 +108,4 @@ When previous messages exist in the thread, you may be refining the same entry O
 - You do NOT have access to the spreadsheet. Never say you need to "check" or "look up" data — just return the operation and extracted fields.
 - Enum values always English. Free-text fields stay in user's language.
 - Today's date will be provided in context.
+- **Turkish terminology:** In Turkish text, always use "saha" (not "site") for customer locations. Example: "mevcut bir sahaya" not "mevcut bir siteye". Code identifiers like site_id and create_site stay as-is.

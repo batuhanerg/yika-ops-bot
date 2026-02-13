@@ -120,7 +120,8 @@ def enforce_must_fields(
         return list(claude_missing)
 
     req = FIELD_REQUIREMENTS[tab]
-    missing: list[str] = list(claude_missing)
+    # Start from Claude's list but remove fields that are actually present in data
+    missing: list[str] = [f for f in claude_missing if not data.get(f)]
 
     # Check must fields
     for field in req.get("must", []):

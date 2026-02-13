@@ -653,14 +653,16 @@ def _handle_query(
             hardware = sheets.read_hardware(site_id) if site_id else sheets.read_hardware()
             support = sheets.read_support_log(site_id) if site_id else sheets.read_support_log()
             implementation = sheets.read_all_implementation()
-            issues = find_missing_data(sites=sites, hardware=hardware, support=support, site_id=site_id, implementation=implementation)
+            stock = sheets.read_stock()
+            issues = find_missing_data(sites=sites, hardware=hardware, support=support, site_id=site_id, implementation=implementation, stock=stock)
             blocks = format_data_quality_response("missing_data", issues, site_id)
             say(blocks=blocks, thread_ts=thread_ts)
 
         elif query_type == "stale_data":
             hardware = sheets.read_hardware(site_id) if site_id else sheets.read_hardware()
             implementation = sheets.read_all_implementation()
-            issues = find_stale_data(hardware=hardware, implementation=implementation, site_id=site_id)
+            stock = sheets.read_stock()
+            issues = find_stale_data(hardware=hardware, implementation=implementation, site_id=site_id, stock=stock)
             blocks = format_data_quality_response("stale_data", issues, site_id)
             say(blocks=blocks, thread_ts=thread_ts)
 

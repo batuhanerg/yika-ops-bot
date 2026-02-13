@@ -46,6 +46,14 @@ _SUPPORT_FIELD_TO_COLUMN = {
     "resolved_date": "Resolved Date", "devices_affected": "Devices Affected",
 }
 
+_STOCK_FIELD_TO_COLUMN = {
+    "location": "Location", "device_type": "Device Type",
+    "hw_version": "HW Version", "fw_version": "FW Version",
+    "qty": "Qty", "condition": "Condition",
+    "reserved_for": "Reserved For", "notes": "Notes",
+    "last_verified": "Last Verified",
+}
+
 
 def _get_skipped_tabs(contract_status: str) -> set[str]:
     """Return tab names to skip based on contract status."""
@@ -60,6 +68,7 @@ def find_missing_data(
     support: list[dict[str, Any]],
     site_id: str | None = None,
     implementation: list[dict[str, Any]] | None = None,
+    stock: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Scan across tabs for empty or incomplete fields.
 
@@ -142,7 +151,7 @@ def find_missing_data(
                         detail = f"{ticket}: Root Cause hâlâ Pending" if value == "Pending" else f"{ticket}: {col} boş"
                         issues.append({
                             "site_id": sid, "tab": "Support Log", "field": col,
-                            "detail": detail, "severity": "important",
+                            "detail": detail, "severity": "must",
                         })
                 elif "required_when_status" in rule:
                     if status not in rule["required_when_status"]:
@@ -151,7 +160,7 @@ def find_missing_data(
                         issues.append({
                             "site_id": sid, "tab": "Support Log", "field": col,
                             "detail": f"{ticket}: {status} ama {col} boş",
-                            "severity": "important",
+                            "severity": "must",
                         })
             elif rule == "always_important":
                 if not value:
@@ -229,6 +238,54 @@ def find_missing_data(
                     "detail": "Kurulum detayı yok", "severity": "important",
                 })
 
+    # --- Stock tab ---
+    stock_req = FIELD_REQUIREMENTS["stock"]
+    if stock is not None:
+        for item in stock:
+            loc = item.get("Location", "?")
+            device = item.get("Device Type", "?")
+            label = f"{loc}/{device}"
+            # Check must fields
+            for field_key in stock_req["must"]:
+                col = _STOCK_FIELD_TO_COLUMN.get(field_key, field_key)
+                if not item.get(col):
+                    issues.append({
+                        "site_id": label, "tab": "Stock", "field": col,
+                        "detail": f"{col} boş", "severity": "must",
+                    })
+            # Check important fields
+            for field_key in stock_req.get("important", []):
+                col = _STOCK_FIELD_TO_COLUMN.get(field_key, field_key)
+                if not item.get(col):
+                    issues.append({
+                        "site_id": label, "tab": "Stock", "field": col,
+                        "detail": f"{col} boş", "severity": "important",
+                    })
+
+    # --- Open ticket aging (>3 days, status ≠ Resolved) ---
+    for entry in filtered_support:
+        sid = entry["Site ID"]
+        if "support_log" in site_skip_tabs.get(sid, set()):
+            continue
+        status = entry.get("Status", "")
+        if status == "Resolved":
+            continue
+        received = entry.get("Received Date", "")
+        if not received:
+            continue
+        try:
+            received_date = date.fromisoformat(received)
+            days_open = (date.today() - received_date).days
+            if days_open > 3:
+                ticket = entry.get("Ticket ID", "?")
+                issues.append({
+                    "site_id": sid, "tab": "Support Log", "field": "Aging",
+                    "detail": f"{ticket}: {days_open} gündür açık (status: {status})",
+                    "severity": "important",
+                })
+        except ValueError:
+            pass
+
     return issues
 
 
@@ -237,6 +294,7 @@ def find_stale_data(
     implementation: list[dict[str, Any]],
     site_id: str | None = None,
     threshold_days: int = 30,
+    stock: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Find records where Last Verified is older than threshold or missing.
 
@@ -294,5 +352,32 @@ def find_stale_data(
                     "site_id": sid, "tab": "Implementation Details",
                     "detail": f"Last Verified geçersiz format ({last_verified})",
                 })
+
+    # --- Stock ---
+    if stock is not None:
+        for item in stock:
+            loc = item.get("Location", "?")
+            device = item.get("Device Type", "?")
+            label = f"{loc}/{device}"
+            last_verified = item.get("Last Verified", "")
+            if not last_verified:
+                issues.append({
+                    "site_id": label, "tab": "Stock",
+                    "detail": f"{device}: Last Verified yok",
+                })
+            else:
+                try:
+                    lv_date = date.fromisoformat(last_verified)
+                    if lv_date < cutoff:
+                        days_old = (date.today() - lv_date).days
+                        issues.append({
+                            "site_id": label, "tab": "Stock",
+                            "detail": f"{device}: {days_old} gün önce doğrulanmış ({last_verified})",
+                        })
+                except ValueError:
+                    issues.append({
+                        "site_id": label, "tab": "Stock",
+                        "detail": f"{device}: Last Verified geçersiz format ({last_verified})",
+                    })
 
     return issues

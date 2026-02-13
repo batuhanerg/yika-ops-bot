@@ -25,6 +25,7 @@ class TestStockKeyMapping:
             "Condition": "condition",
             "Reserved For": "reserved_for",
             "Notes": "notes",
+            "Last Verified": "last_verified",
         }
         for col in STOCK_COLUMNS:
             key = col.lower().replace(" ", "_").replace("-", "_")

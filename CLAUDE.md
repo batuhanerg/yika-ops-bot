@@ -276,6 +276,20 @@ GOOGLE_SERVICE_ACCOUNT_JSON=...
 
 ---
 
+## v1.7.1: Live Sheet Alignment ✅
+
+**Status:** Complete — 384+ tests passing.
+
+**What was done:**
+- Priority 1 (code fixes): Stock `Last Verified` column added to `STOCK_COLUMNS`, `read_sites()` now strips helper columns (`_SiteLabel`, etc.)
+- Priority 2 (manual): Column order aligned in live sheet, missing helper columns added
+- Priority 3 (partial): Conditional formatting script rewritten to match live sheet (7 fixes: stale verified 3 tabs, stale ticket 3-day threshold, Gateway in device type rules, facility type red severity, SL conditional rules, devices_affected important, AI guard for Awaiting Installation)
+- Migration scripts (`scripts/`) are standalone manual tools, not called by runtime code
+
+**16 new tests** in conditional formatting + 1 new sheets helper column test
+
+---
+
 ## Important Rules (all sessions)
 
 1. **Never write to Google Sheets without user confirmation.** Parse → show confirmation → wait for ✅ → write.

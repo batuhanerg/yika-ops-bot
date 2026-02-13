@@ -292,7 +292,7 @@ class TestMissingDataConditionalImportance:
         assert len(fw_issues) == 0
 
     def test_root_cause_flagged_when_status_resolved(self):
-        """Root cause is important when status is not Open."""
+        """Root cause is must when status is not Open."""
         support = [
             {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-001",
              "Status": "Resolved", "Root Cause": "", "Resolution": "Fixed"},
@@ -300,6 +300,7 @@ class TestMissingDataConditionalImportance:
         result = find_missing_data(sites=[], hardware=[], support=support, site_id="MIG-TR-01")
         rc_issues = [r for r in result if r["field"] == "Root Cause"]
         assert len(rc_issues) == 1
+        assert rc_issues[0]["severity"] == "must"
 
     def test_root_cause_not_flagged_when_status_open(self):
         """Root cause is NOT flagged when status is Open."""
@@ -312,7 +313,7 @@ class TestMissingDataConditionalImportance:
         assert len(rc_issues) == 0
 
     def test_resolution_flagged_when_resolved(self):
-        """Resolution is important when status is Resolved."""
+        """Resolution is must when status is Resolved."""
         support = [
             {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-002",
              "Status": "Resolved", "Root Cause": "FW Bug", "Resolution": ""},
@@ -320,9 +321,11 @@ class TestMissingDataConditionalImportance:
         result = find_missing_data(sites=[], hardware=[], support=support, site_id="MIG-TR-01")
         fields = [r["field"] for r in result if r["tab"] == "Support Log"]
         assert "Resolution" in fields
+        res_issues = [r for r in result if r["field"] == "Resolution"]
+        assert res_issues[0]["severity"] == "must"
 
     def test_pending_root_cause_still_flagged(self):
-        """Root cause 'Pending' is flagged for non-Open statuses."""
+        """Root cause 'Pending' is flagged for non-Open statuses with must severity."""
         support = [
             {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-001",
              "Status": "Follow-up (ERG)", "Root Cause": "Pending", "Resolution": ""},
@@ -331,6 +334,7 @@ class TestMissingDataConditionalImportance:
         rc_issues = [r for r in result if r["field"] == "Root Cause"]
         assert len(rc_issues) == 1
         assert "Pending" in rc_issues[0]["detail"]
+        assert rc_issues[0]["severity"] == "must"
 
 
 class TestStaleData:
@@ -425,6 +429,140 @@ class TestDataQualityFormatter:
         blocks = format_data_quality_response("missing_data", [], site_id=None)
         text = json.dumps(blocks, ensure_ascii=False)
         assert "Tüm sahalar" in text
+
+
+class TestMissingDataStock:
+    """Test missing data detection on Stock tab."""
+
+    def test_stock_must_field_flagged(self):
+        """Missing must field (e.g., no Condition) → severity='must'."""
+        stock = [
+            {"Location": "Istanbul Office", "Device Type": "Tag", "Qty": 50,
+             "Condition": "", "HW Version": "1.0", "FW Version": "2.4.1",
+             "Reserved For": "", "Notes": "", "Last Verified": "2025-01-01"},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=[],
+                                   site_id=None, stock=stock)
+        cond_issues = [r for r in result if r["tab"] == "Stock" and r["field"] == "Condition"]
+        assert len(cond_issues) == 1
+        assert cond_issues[0]["severity"] == "must"
+
+    def test_stock_important_field_flagged(self):
+        """Missing important field (FW Version) → severity='important'."""
+        stock = [
+            {"Location": "Istanbul Office", "Device Type": "Tag", "Qty": 50,
+             "Condition": "New", "HW Version": "", "FW Version": "",
+             "Reserved For": "", "Notes": "", "Last Verified": "2025-01-01"},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=[],
+                                   site_id=None, stock=stock)
+        fw_issues = [r for r in result if r["tab"] == "Stock" and r["field"] == "FW Version"]
+        assert len(fw_issues) == 1
+        assert fw_issues[0]["severity"] == "important"
+
+    def test_stock_optional_not_flagged(self):
+        """Optional fields (Reserved For, Notes) are never flagged."""
+        stock = [
+            {"Location": "Istanbul Office", "Device Type": "Tag", "Qty": 50,
+             "Condition": "New", "HW Version": "1.0", "FW Version": "2.4.1",
+             "Reserved For": "", "Notes": "", "Last Verified": "2025-01-01"},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=[],
+                                   site_id=None, stock=stock)
+        stock_issues = [r for r in result if r["tab"] == "Stock"]
+        fields = [r["field"] for r in stock_issues]
+        assert "Reserved For" not in fields
+        assert "Notes" not in fields
+
+
+class TestOpenTicketAging:
+    """Test open ticket aging check (>3 days)."""
+
+    def test_old_open_ticket_flagged(self):
+        """Open ticket older than 3 days → flagged."""
+        old_date = (date.today() - timedelta(days=5)).isoformat()
+        support = [
+            {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-001",
+             "Status": "Open", "Received Date": old_date,
+             "Root Cause": "", "Resolution": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=support, site_id="MIG-TR-01")
+        aging_issues = [r for r in result if r.get("field") == "Aging"]
+        assert len(aging_issues) == 1
+        assert "5" in aging_issues[0]["detail"]
+
+    def test_recent_open_ticket_not_flagged(self):
+        """Open ticket within 3 days → not flagged for aging."""
+        recent_date = (date.today() - timedelta(days=1)).isoformat()
+        support = [
+            {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-001",
+             "Status": "Open", "Received Date": recent_date,
+             "Root Cause": "", "Resolution": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=support, site_id="MIG-TR-01")
+        aging_issues = [r for r in result if r.get("field") == "Aging"]
+        assert len(aging_issues) == 0
+
+    def test_resolved_ticket_not_flagged_for_aging(self):
+        """Resolved tickets are never flagged for aging regardless of age."""
+        old_date = (date.today() - timedelta(days=30)).isoformat()
+        support = [
+            {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-001",
+             "Status": "Resolved", "Received Date": old_date,
+             "Root Cause": "FW Bug", "Resolution": "Fixed",
+             "Resolved Date": old_date},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=support, site_id="MIG-TR-01")
+        aging_issues = [r for r in result if r.get("field") == "Aging"]
+        assert len(aging_issues) == 0
+
+    def test_followup_ticket_flagged_for_aging(self):
+        """Follow-up tickets >3 days old are flagged."""
+        old_date = (date.today() - timedelta(days=5)).isoformat()
+        support = [
+            {"Site ID": "MIG-TR-01", "Ticket ID": "SUP-001",
+             "Status": "Follow-up (ERG)", "Received Date": old_date,
+             "Root Cause": "FW Bug", "Resolution": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=support, site_id="MIG-TR-01")
+        aging_issues = [r for r in result if r.get("field") == "Aging"]
+        assert len(aging_issues) == 1
+
+
+class TestStaleDataStock:
+    """Test stale data detection for Stock tab."""
+
+    def test_stale_stock(self):
+        old_date = (date.today() - timedelta(days=45)).isoformat()
+        stock = [
+            {"Location": "Istanbul Office", "Device Type": "Tag", "Qty": 50,
+             "Last Verified": old_date},
+        ]
+        result = find_stale_data(hardware=[], implementation=[], site_id=None,
+                                 threshold_days=30, stock=stock)
+        stock_issues = [r for r in result if r["tab"] == "Stock"]
+        assert len(stock_issues) == 1
+
+    def test_fresh_stock_not_stale(self):
+        fresh_date = (date.today() - timedelta(days=5)).isoformat()
+        stock = [
+            {"Location": "Istanbul Office", "Device Type": "Tag", "Qty": 50,
+             "Last Verified": fresh_date},
+        ]
+        result = find_stale_data(hardware=[], implementation=[], site_id=None,
+                                 threshold_days=30, stock=stock)
+        stock_issues = [r for r in result if r["tab"] == "Stock"]
+        assert len(stock_issues) == 0
+
+    def test_missing_last_verified_stock_is_stale(self):
+        stock = [
+            {"Location": "Istanbul Office", "Device Type": "Tag", "Qty": 50,
+             "Last Verified": ""},
+        ]
+        result = find_stale_data(hardware=[], implementation=[], site_id=None,
+                                 threshold_days=30, stock=stock)
+        stock_issues = [r for r in result if r["tab"] == "Stock"]
+        assert len(stock_issues) == 1
 
 
 class TestDataQualityQueryWiring:

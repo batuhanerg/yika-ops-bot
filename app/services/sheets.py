@@ -31,7 +31,7 @@ SUPPORT_LOG_COLUMNS = [
 
 STOCK_COLUMNS = [
     "Location", "Device Type", "HW Version", "FW Version", "Qty",
-    "Condition", "Reserved For", "Notes",
+    "Condition", "Reserved For", "Notes", "Last Verified",
 ]
 
 AUDIT_LOG_COLUMNS = [
@@ -99,6 +99,14 @@ def _sanitize_cell(value: Any) -> Any:
     return value
 
 
+def _strip_helper_columns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove helper columns (starting with '_') from record dicts."""
+    return [
+        {k: v for k, v in record.items() if not k.startswith("_")}
+        for record in records
+    ]
+
+
 class SheetsService:
     """Read/write operations against the ERG Controls Google Sheet."""
 
@@ -121,7 +129,7 @@ class SheetsService:
     # --- Sites ---
 
     def read_sites(self) -> list[dict[str, Any]]:
-        return self._ws("Sites").get_all_records()
+        return _strip_helper_columns(self._ws("Sites").get_all_records())
 
     def create_site(self, data: dict[str, Any]) -> None:
         row = [data.get(k, "") for k in _SITES_KEY_MAP]
@@ -149,7 +157,7 @@ class SheetsService:
     # --- Hardware Inventory ---
 
     def read_hardware(self, site_id: str | None = None) -> list[dict[str, Any]]:
-        records = self._ws("Hardware Inventory").get_all_records()
+        records = _strip_helper_columns(self._ws("Hardware Inventory").get_all_records())
         if site_id:
             return [r for r in records if r["Site ID"] == site_id]
         return records
@@ -172,7 +180,8 @@ class SheetsService:
         headers = all_values[1]  # Row 2 has field names
         for row in all_values[2:]:
             if row and row[0] == site_id:
-                return {headers[i]: row[i] for i in range(len(headers)) if i < len(row)}
+                return {headers[i]: row[i] for i in range(len(headers))
+                        if i < len(row) and not headers[i].startswith("_")}
         return {}
 
     def read_all_implementation(self) -> list[dict[str, Any]]:
@@ -185,7 +194,8 @@ class SheetsService:
         results = []
         for row in all_values[2:]:
             if row and row[0]:
-                results.append({headers[i]: row[i] for i in range(len(headers)) if i < len(row)})
+                results.append({headers[i]: row[i] for i in range(len(headers))
+                                if i < len(row) and not headers[i].startswith("_")})
         return results
 
     def update_implementation(self, site_id: str, updates: dict[str, Any]) -> None:
@@ -217,7 +227,7 @@ class SheetsService:
     # --- Support Log ---
 
     def read_support_log(self, site_id: str | None = None) -> list[dict[str, Any]]:
-        records = self._ws("Support Log").get_all_records()
+        records = _strip_helper_columns(self._ws("Support Log").get_all_records())
         if site_id:
             return [r for r in records if r["Site ID"] == site_id]
         return records

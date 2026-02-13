@@ -4,7 +4,7 @@ Color rules:
 - Red (#FFEBEE): empty must-field cells
 - Yellow (#FFF9C4): empty important-field cells
 - Blue (#E3F2FD): Last Verified older than 30 days
-- Orange (#FFF3E0): Support Log entries with status != Resolved and Received Date > 7 days
+- Orange (#FFF3E0): Support Log entries with status != Resolved and Received Date > 3 days
 
 Context-aware: skips formatting for "Awaiting Installation" sites.
 Idempotent: clears existing rules before applying.
@@ -122,8 +122,8 @@ def build_formatting_rules() -> list[dict]:
                 "color": COLOR_YELLOW,
             })
 
-    # Special rules: Last Verified empty or > 30 days → blue
-    for tab_name in ["Hardware Inventory"]:
+    # Special rules: Last Verified empty or > 30 days → blue (HW, Impl, Stock)
+    for tab_name in ["Hardware Inventory", "Implementation Details", "Stock"]:
         rules.append({
             "tab": tab_name,
             "field": "Last Verified",
@@ -131,7 +131,7 @@ def build_formatting_rules() -> list[dict]:
             "color": COLOR_BLUE,
         })
 
-    # Special rules: Open support tickets > 7 days → orange
+    # Special rules: Open support tickets > 3 days → orange (full row)
     rules.append({
         "tab": "Support Log",
         "field": "Received Date",
@@ -139,17 +139,18 @@ def build_formatting_rules() -> list[dict]:
         "color": COLOR_ORANGE,
     })
 
-    # Device type conditional: Tag/Anchor → red for HW/FW Version
+    # Device type conditional: Tag/Anchor/Gateway → yellow for HW/FW Version
     for field in ["hw_version", "fw_version"]:
         col_name = _FIELD_TO_COLUMN.get(field, field)
         rules.append({
             "tab": "Hardware Inventory",
             "field": col_name,
-            "severity": "device_type_must",
-            "color": COLOR_RED,
+            "severity": "device_type_conditional",
+            "color": COLOR_YELLOW,
         })
 
-    # Facility type conditional: Food/Healthcare → yellow for specific fields
+    # Facility type conditional: Food/Healthcare → red for specific fields
+    # (must_when_facility_type = must-level when condition met)
     facility_rules = FIELD_REQUIREMENTS.get("implementation_details", {}).get(
         "must_when_facility_type", {}
     )
@@ -160,6 +161,37 @@ def build_formatting_rules() -> list[dict]:
                 "tab": "Implementation Details",
                 "field": col_name,
                 "severity": f"facility_{facility_type.lower()}",
+                "color": COLOR_RED,
+            })
+
+    # Support Log conditional rules from important_conditional
+    sl_conditional = FIELD_REQUIREMENTS.get("support_log", {}).get(
+        "important_conditional", {}
+    )
+    for field, rule in sl_conditional.items():
+        col_name = _FIELD_TO_COLUMN.get(field, field)
+        if isinstance(rule, dict):
+            if "required_when_status_not" in rule:
+                rules.append({
+                    "tab": "Support Log",
+                    "field": col_name,
+                    "severity": "sl_conditional_status_not",
+                    "color": COLOR_RED,
+                    "status_not": rule["required_when_status_not"],
+                })
+            elif "required_when_status" in rule:
+                rules.append({
+                    "tab": "Support Log",
+                    "field": col_name,
+                    "severity": "sl_conditional_status",
+                    "color": COLOR_RED,
+                    "status_values": rule["required_when_status"],
+                })
+        elif rule == "always_important":
+            rules.append({
+                "tab": "Support Log",
+                "field": col_name,
+                "severity": "important",
                 "color": COLOR_YELLOW,
             })
 
@@ -229,6 +261,13 @@ def _delete_existing_rules(spreadsheet) -> int:
 _SITE_VIEWER_MUST_ROWS = [7, 8, 9, 11, 13, 14, 20]  # Customer,City,Country,Facility,Sup1,Phone1,Contract
 _SITE_VIEWER_IMPORTANT_ROWS = [10, 12, 19]  # Address, Dashboard Link, Go-live Date
 
+# Reverse map: Implementation Details column_name_lowercase → severity
+_impl_field_severity: dict[str, str] = {}
+for _f in FIELD_REQUIREMENTS.get("implementation_details", {}).get("must", []):
+    _impl_field_severity[_FIELD_TO_COLUMN.get(_f, _f).lower()] = "must"
+for _f in FIELD_REQUIREMENTS.get("implementation_details", {}).get("important", []):
+    _impl_field_severity[_FIELD_TO_COLUMN.get(_f, _f).lower()] = "important"
+
 
 def _build_site_viewer_requests(sheet_id: int) -> list[dict]:
     """Build conditional formatting requests for Site Viewer site info section."""
@@ -287,12 +326,204 @@ def _build_site_viewer_requests(sheet_id: int) -> list[dict]:
     return add_requests
 
 
+def _build_site_viewer_data_requests(
+    sheet_id: int,
+    viewer_content: list[list[str]],
+) -> list[dict]:
+    """Build conditional formatting for Site Viewer data sections.
+
+    Detects section positions from the viewer content and builds rules for:
+    - Implementation Details parameter values (column C)
+    - Hardware Inventory data (columns B-G)
+    - Support Log data (columns B-N)
+    """
+    add_requests = []
+    helper_ref = "$D$4"
+
+    # Detect section positions
+    hw_section = impl_section = sl_section = None
+    for i, row in enumerate(viewer_content):
+        row_text = " ".join(row).upper()
+        if "HARDWARE INVENTORY" in row_text:
+            hw_section = i + 1  # 1-based
+        elif "IMPLEMENTATION DETAILS" in row_text:
+            impl_section = i + 1
+        elif "SUPPORT LOG" in row_text:
+            sl_section = i + 1
+
+    # --- Implementation Details: parameter values in column C ---
+    if impl_section:
+        impl_data_start = impl_section + 2  # skip section header + sub-header
+        for i in range(impl_data_start - 1, len(viewer_content)):
+            row = viewer_content[i]
+            param_name = row[1].strip() if len(row) > 1 else ""
+            if not param_name:
+                break
+            severity = _impl_field_severity.get(param_name.lower())
+            if severity == "must":
+                color = COLOR_RED
+            elif severity == "important":
+                color = COLOR_YELLOW
+            else:
+                continue
+            row_num = i + 1  # 1-based
+            formula = f'=AND({helper_ref}<>"",C{row_num}="")'
+            add_requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": sheet_id,
+                            "startRowIndex": i,
+                            "endRowIndex": i + 1,
+                            "startColumnIndex": 2,  # C
+                            "endColumnIndex": 3,
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue": formula}],
+                            },
+                            "format": {"backgroundColor": color},
+                        },
+                    },
+                    "index": 0,
+                }
+            })
+
+    # --- Hardware Inventory: columns B-G ---
+    if hw_section:
+        hw_data_start = hw_section + 2  # section header + column headers
+        # Determine end: up to impl_section or 15 rows max
+        hw_data_end = min(
+            hw_data_start + 14,
+            (impl_section - 2) if impl_section else hw_data_start + 14,
+        )
+        data_row = hw_data_start
+
+        # Must: Device Type (B=1), Qty (E=4)
+        for col_idx in [1, 4]:
+            col_letter = chr(ord("A") + col_idx)
+            formula = f'=AND({helper_ref}<>"",$B{data_row}<>"",{col_letter}{data_row}="")'
+            add_requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": sheet_id,
+                            "startRowIndex": hw_data_start - 1,
+                            "endRowIndex": hw_data_end,
+                            "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1,
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue": formula}],
+                            },
+                            "format": {"backgroundColor": COLOR_RED},
+                        },
+                    },
+                    "index": 0,
+                }
+            })
+
+        # HW/FW Version yellow for Tag/Anchor/Gateway: C(2), D(3)
+        for col_idx in [2, 3]:
+            col_letter = chr(ord("A") + col_idx)
+            formula = (
+                f'=AND({helper_ref}<>"",$B{data_row}<>"",'
+                f'OR($B{data_row}="Tag",$B{data_row}="Anchor",$B{data_row}="Gateway"),'
+                f'{col_letter}{data_row}="")'
+            )
+            add_requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": sheet_id,
+                            "startRowIndex": hw_data_start - 1,
+                            "endRowIndex": hw_data_end,
+                            "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1,
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue": formula}],
+                            },
+                            "format": {"backgroundColor": COLOR_YELLOW},
+                        },
+                    },
+                    "index": 0,
+                }
+            })
+
+        # Last Verified stale (F=5): empty or > 30 days
+        formula = f'=AND({helper_ref}<>"",$B{data_row}<>"",TODAY()-F{data_row}>30)'
+        add_requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sheet_id,
+                        "startRowIndex": hw_data_start - 1,
+                        "endRowIndex": hw_data_end,
+                        "startColumnIndex": 5,  # F
+                        "endColumnIndex": 6,
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": formula}],
+                        },
+                        "format": {"backgroundColor": COLOR_BLUE},
+                    },
+                },
+                "index": 0,
+            }
+        })
+
+    # --- Support Log: columns B-N, must fields ---
+    if sl_section:
+        sl_data_row = sl_section + 2  # section header + column headers
+        sl_data_end = sl_data_row + 19  # 20 rows
+
+        # SORT starts at B, so columns are:
+        # B=Ticket, C=Site ID, D=Received, E=Resolved, F=Type, G=Status,
+        # H=Root Cause, I=Reported By, J=Issue Summary, K=Resolution,
+        # L=Devices Affected, M=Responsible, N=Notes
+        sl_must_cols = [2, 3, 5, 6, 9, 12]  # C,D,F,G,J,M (0-based)
+        for col_idx in sl_must_cols:
+            col_letter = chr(ord("A") + col_idx)
+            formula = f'=AND({helper_ref}<>"",$B{sl_data_row}<>"",{col_letter}{sl_data_row}="")'
+            add_requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": sheet_id,
+                            "startRowIndex": sl_data_row - 1,
+                            "endRowIndex": sl_data_end,
+                            "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1,
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue": formula}],
+                            },
+                            "format": {"backgroundColor": COLOR_RED},
+                        },
+                    },
+                    "index": 0,
+                }
+            })
+
+    return add_requests
+
+
 def _build_device_type_version_requests(
     sheet_id: int,
     headers: list[str],
     header_row: int = 1,
 ) -> list[dict]:
-    """Build conditional formatting: red for HW/FW Version when Device Type is Tag or Anchor."""
+    """Build conditional formatting: yellow for HW/FW Version when Device Type is Tag, Anchor, or Gateway."""
     device_type_idx = _find_col_index(headers, "Device Type")
     hw_idx = _find_col_index(headers, "HW Version")
     fw_idx = _find_col_index(headers, "FW Version")
@@ -310,7 +541,7 @@ def _build_device_type_version_requests(
         ver_letter = chr(ord("A") + ver_idx)
         formula = (
             f'=AND($A{data_row}<>"",'
-            f'OR(${dt_letter}{data_row}="Tag",${dt_letter}{data_row}="Anchor"),'
+            f'OR(${dt_letter}{data_row}="Tag",${dt_letter}{data_row}="Anchor",${dt_letter}{data_row}="Gateway"),'
             f'{ver_letter}{data_row}="")'
         )
         add_requests.append({
@@ -327,7 +558,7 @@ def _build_device_type_version_requests(
                             "type": "CUSTOM_FORMULA",
                             "values": [{"userEnteredValue": formula}],
                         },
-                        "format": {"backgroundColor": COLOR_RED},
+                        "format": {"backgroundColor": COLOR_YELLOW},
                     },
                 },
                 "index": 0,
@@ -386,7 +617,7 @@ def _build_facility_type_conditional_requests(
     """Build conditional formatting for facility-type-specific Implementation Details fields.
 
     References the local _FacilityType helper column (not cross-sheet VLOOKUP).
-    Food-specific and Healthcare-specific fields get yellow (important) highlighting.
+    Food-specific and Healthcare-specific fields get red (must) highlighting.
     """
     add_requests = []
     data_row = header_row + 1  # Row 3 for Implementation Details
@@ -424,7 +655,7 @@ def _build_facility_type_conditional_requests(
                                 "type": "CUSTOM_FORMULA",
                                 "values": [{"userEnteredValue": formula}],
                             },
-                            "format": {"backgroundColor": COLOR_YELLOW},
+                            "format": {"backgroundColor": COLOR_RED},
                         },
                     },
                     "index": 0,
@@ -563,10 +794,15 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
         elif severity == "stale_verified":
             # Last Verified empty or > 30 days ago → blue
             # Empty cells are treated as 0 by Sheets, so TODAY()-0 > 30 is
-            # always true — just removing the <>"" guard handles both cases.
+            # always true. Add AI guard for HW/Impl (skip Awaiting Installation).
             data_row = hdr_row + 1
             col_letter = chr(ord("A") + col_idx)
-            formula = f'=TODAY()-{col_letter}{data_row}>30'
+            cs_idx = _find_col_index(headers, "_ContractStatus")
+            if cs_idx is not None:
+                cs_letter = chr(ord("A") + cs_idx)
+                formula = f'${cs_letter}{data_row}<>"Awaiting Installation",TODAY()-{col_letter}{data_row}>30'
+            else:
+                formula = f'TODAY()-{col_letter}{data_row}>30'
             add_requests.append(
                 _build_add_rule_request(
                     sid, col_idx, color, rule_type="custom",
@@ -575,13 +811,84 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
                 )
             )
         elif severity == "stale_ticket":
-            # Status != Resolved AND Received Date > 7 days → orange
+            # Status != Resolved AND Received Date > 3 days → orange (full row A:M)
             status_idx = _find_col_index(headers, "Status")
             if status_idx is not None:
                 data_row = hdr_row + 1
                 col_letter = chr(ord("A") + col_idx)
                 status_letter = chr(ord("A") + status_idx)
-                formula = f'=AND({status_letter}{data_row}<>"Resolved",{col_letter}{data_row}<>"",TODAY()-{col_letter}{data_row}>7)'
+                # Determine last column (Notes = M for SL)
+                end_col_idx = len(headers)
+                # Exclude helper columns from range
+                for i in range(len(headers) - 1, -1, -1):
+                    if not headers[i].startswith("_"):
+                        end_col_idx = i + 1
+                        break
+                formula = (
+                    f'=AND(${first_col}{data_row}<>"",'
+                    f'${status_letter}{data_row}<>"Resolved",'
+                    f'${col_letter}{data_row}<>"",'
+                    f'TODAY()-${col_letter}{data_row}>3)'
+                )
+                add_requests.append({
+                    "addConditionalFormatRule": {
+                        "rule": {
+                            "ranges": [{
+                                "sheetId": sid,
+                                "startRowIndex": hdr_row,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": end_col_idx,
+                            }],
+                            "booleanRule": {
+                                "condition": {
+                                    "type": "CUSTOM_FORMULA",
+                                    "values": [{"userEnteredValue": formula}],
+                                },
+                                "format": {"backgroundColor": color},
+                            },
+                        },
+                        "index": 0,
+                    }
+                })
+        elif severity == "sl_conditional_status_not":
+            # RED when status is NOT in list and field is empty
+            status_idx = _find_col_index(headers, "Status")
+            if status_idx is not None:
+                data_row = hdr_row + 1
+                col_letter = chr(ord("A") + col_idx)
+                status_letter = chr(ord("A") + status_idx)
+                status_values = rule.get("status_not", [])
+                status_checks = ",".join(
+                    f'${status_letter}{data_row}="{s}"' for s in status_values
+                )
+                formula = (
+                    f'=AND(${first_col}{data_row}<>"",'
+                    f'NOT(OR({status_checks})),'
+                    f'{col_letter}{data_row}="")'
+                )
+                add_requests.append(
+                    _build_add_rule_request(
+                        sid, col_idx, color, rule_type="custom",
+                        custom_formula=formula,
+                        first_col_letter=first_col, header_row=hdr_row,
+                    )
+                )
+        elif severity == "sl_conditional_status":
+            # RED when status IS in list and field is empty
+            status_idx = _find_col_index(headers, "Status")
+            if status_idx is not None:
+                data_row = hdr_row + 1
+                col_letter = chr(ord("A") + col_idx)
+                status_letter = chr(ord("A") + status_idx)
+                status_values = rule.get("status_values", [])
+                status_checks = ",".join(
+                    f'${status_letter}{data_row}="{s}"' for s in status_values
+                )
+                formula = (
+                    f'=AND(${first_col}{data_row}<>"",'
+                    f'OR({status_checks}),'
+                    f'{col_letter}{data_row}="")'
+                )
                 add_requests.append(
                     _build_add_rule_request(
                         sid, col_idx, color, rule_type="custom",
@@ -590,13 +897,27 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
                     )
                 )
 
-    # Add Site Viewer conditional formatting (red/yellow for site info)
+    # Add Site Viewer conditional formatting
     if "Site Viewer" in sheet_ids:
+        # Site info section (rows 7-21)
         viewer_rules = _build_site_viewer_requests(sheet_ids["Site Viewer"])
         add_requests.extend(viewer_rules)
-        print(f"  Site Viewer: {len(viewer_rules)} formatting rules (must=red, important=yellow)")
 
-    # Device type conditional: Tag/Anchor → red for HW/FW Version
+        # Data sections (impl details, hardware, support log)
+        try:
+            viewer_ws = spreadsheet.worksheet("Site Viewer")
+            viewer_content = viewer_ws.get_all_values()
+            data_rules = _build_site_viewer_data_requests(
+                sheet_ids["Site Viewer"], viewer_content,
+            )
+            viewer_rules.extend(data_rules)
+            add_requests.extend(data_rules)
+        except Exception as e:
+            print(f"  WARNING: Could not build Site Viewer data rules ({e})")
+
+        print(f"  Site Viewer: {len(viewer_rules)} formatting rules")
+
+    # Device type conditional: Tag/Anchor/Gateway → yellow for HW/FW Version
     if "Hardware Inventory" in sheet_ids:
         hw_rules = _build_device_type_version_requests(
             sheet_ids["Hardware Inventory"],
@@ -605,9 +926,9 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
         )
         add_requests.extend(hw_rules)
         if hw_rules:
-            print(f"  Hardware Inventory: {len(hw_rules)} device-type version rules (Tag/Anchor)")
+            print(f"  Hardware Inventory: {len(hw_rules)} device-type version rules (Tag/Anchor/Gateway)")
 
-    # Facility type conditional: Food/Healthcare → yellow for specific fields
+    # Facility type conditional: Food/Healthcare → red for specific fields
     # Uses a local _FacilityType helper column (cross-sheet refs not supported
     # in conditional formatting API)
     if "Implementation Details" in sheet_ids and "Sites" in sheet_ids:

@@ -7,7 +7,7 @@ Integration tests against the real sheet can be run with --run-sheets flag.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.services.sheets import SheetsService
+from app.services.sheets import SheetsService, STOCK_COLUMNS
 
 
 @pytest.fixture
@@ -315,3 +315,118 @@ class TestReadStock:
         service, ws = sheets_service
         stock = service.read_stock()
         assert len(stock) == 3
+
+
+class TestStockColumnsDefinition:
+    def test_stock_columns_includes_last_verified(self):
+        """Live sheet has 'Last Verified' on Stock tab — code must match."""
+        assert "Last Verified" in STOCK_COLUMNS
+
+
+class TestHelperColumnFiltering:
+    """Helper columns (_ContractStatus, _FacilityType) must be filtered from reads."""
+
+    def test_hardware_excludes_helper_columns(self):
+        """read_hardware should NOT return _ContractStatus."""
+        mock_gc = MagicMock()
+        mock_spreadsheet = MagicMock()
+        hw_ws = MagicMock()
+        hw_ws.get_all_records.return_value = [
+            {"Site ID": "MIG-TR-01", "Device Type": "Tag", "HW Version": "",
+             "FW Version": "2.4.1", "Qty": 20, "Last Verified": "2025-01-10",
+             "Notes": "", "_ContractStatus": "Active"},
+        ]
+        mock_spreadsheet.worksheet.return_value = hw_ws
+        with patch("app.services.sheets.SheetsService._connect"):
+            service = SheetsService.__new__(SheetsService)
+            service.spreadsheet = mock_spreadsheet
+            service._ws_cache = {}
+
+        records = service.read_hardware("MIG-TR-01")
+        assert len(records) == 1
+        assert "_ContractStatus" not in records[0]
+
+    def test_support_log_excludes_helper_columns(self):
+        """read_support_log should NOT return _ContractStatus."""
+        mock_gc = MagicMock()
+        mock_spreadsheet = MagicMock()
+        sl_ws = MagicMock()
+        sl_ws.get_all_records.return_value = [
+            {"Ticket ID": "SUP-001", "Site ID": "MIG-TR-01",
+             "Received Date": "2025-01-10", "Status": "Open",
+             "_ContractStatus": "Active"},
+        ]
+        mock_spreadsheet.worksheet.return_value = sl_ws
+        with patch("app.services.sheets.SheetsService._connect"):
+            service = SheetsService.__new__(SheetsService)
+            service.spreadsheet = mock_spreadsheet
+            service._ws_cache = {}
+
+        records = service.read_support_log("MIG-TR-01")
+        assert len(records) == 1
+        assert "_ContractStatus" not in records[0]
+
+    def test_implementation_excludes_helper_columns(self):
+        """read_implementation should NOT return _FacilityType or _ContractStatus."""
+        mock_gc = MagicMock()
+        mock_spreadsheet = MagicMock()
+        impl_ws = MagicMock()
+        impl_ws.get_all_values.return_value = [
+            ["", "GENERAL", "", "", "FACILITY", ""],
+            ["Site ID", "Internet Provider", "SSID", "Password",
+             "_FacilityType", "_ContractStatus"],
+            ["MIG-TR-01", "ERG Controls", "ERG-Net", "pass123", "Food", "Active"],
+        ]
+        mock_spreadsheet.worksheet.return_value = impl_ws
+        with patch("app.services.sheets.SheetsService._connect"):
+            service = SheetsService.__new__(SheetsService)
+            service.spreadsheet = mock_spreadsheet
+            service._ws_cache = {}
+
+        result = service.read_implementation("MIG-TR-01")
+        assert "Internet Provider" in result
+        assert "_FacilityType" not in result
+        assert "_ContractStatus" not in result
+
+    def test_sites_excludes_helper_columns(self):
+        """read_sites should NOT return _SiteLabel or other helper columns."""
+        mock_spreadsheet = MagicMock()
+        sites_ws = MagicMock()
+        sites_ws.get_all_records.return_value = [
+            {"Site ID": "MIG-TR-01", "Customer": "Migros", "City": "Istanbul",
+             "Country": "Turkey", "Contract Status": "Active",
+             "_SiteLabel": "Migros (MIG-TR-01)"},
+        ]
+        mock_spreadsheet.worksheet.return_value = sites_ws
+        with patch("app.services.sheets.SheetsService._connect"):
+            service = SheetsService.__new__(SheetsService)
+            service.spreadsheet = mock_spreadsheet
+            service._ws_cache = {}
+
+        records = service.read_sites()
+        assert len(records) == 1
+        assert records[0]["Site ID"] == "MIG-TR-01"
+        assert records[0]["Customer"] == "Migros"
+        assert "_SiteLabel" not in records[0]
+
+    def test_all_implementation_excludes_helper_columns(self):
+        """read_all_implementation should NOT return helper columns."""
+        mock_gc = MagicMock()
+        mock_spreadsheet = MagicMock()
+        impl_ws = MagicMock()
+        impl_ws.get_all_values.return_value = [
+            ["", "GENERAL", "", "", "FACILITY", ""],
+            ["Site ID", "Internet Provider", "SSID", "Password",
+             "_FacilityType", "_ContractStatus"],
+            ["MIG-TR-01", "ERG Controls", "ERG-Net", "pass123", "Food", "Active"],
+        ]
+        mock_spreadsheet.worksheet.return_value = impl_ws
+        with patch("app.services.sheets.SheetsService._connect"):
+            service = SheetsService.__new__(SheetsService)
+            service.spreadsheet = mock_spreadsheet
+            service._ws_cache = {}
+
+        results = service.read_all_implementation()
+        assert len(results) == 1
+        assert "_FacilityType" not in results[0]
+        assert "_ContractStatus" not in results[0]

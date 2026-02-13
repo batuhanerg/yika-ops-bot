@@ -359,7 +359,7 @@ def register(app: App) -> None:
             "feedback_awaiting_response": True,
         })
 
-        say(text="Ne olmalıydı? Lütfen doğru bilgiyi yazın.", thread_ts=thread_ts, channel=channel)
+        say(text="Nasıl daha iyi yapabilirdim?", thread_ts=thread_ts, channel=channel)
 
 
 def _execute_write(sheets: SheetsService, operation: str, data: dict[str, Any]) -> str | None:

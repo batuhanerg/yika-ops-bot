@@ -469,7 +469,7 @@ def format_chain_input_prompt(
     if tab and tab in FIELD_REQUIREMENTS:
         req = FIELD_REQUIREMENTS[tab]
 
-        must_fields = list(req.get("must", []))
+        must_fields = [f for f in req.get("must", []) if f != "site_id"]
         # Add facility-type must fields
         if facility_type:
             facility_must = req.get("must_when_facility_type", {})

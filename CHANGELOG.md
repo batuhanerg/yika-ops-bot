@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.7.2 — Live Testing Bug Fixes (2026-02-13)
+
+### Fixed
+- **Bug 1: Chain step loses site_id context** — `enforce_must_fields()` now removes fields from Claude's missing list when they're already present in data; `format_chain_input_prompt()` no longer lists site_id as required (it's always known in chain context)
+- **Bug 2: Este Nove resolving to wrong site** — site resolver's `by_customer` and `by_alias` indexes now store lists instead of overwriting on collision; alias fuzzy matching uses `fuzz.ratio` instead of `fuzz.partial_ratio` to prevent short aliases (e.g., "est") from outscoring full customer names
+- **Bug 3: "site" instead of "saha" in chain response** — added Turkish terminology rule to system prompt instructing Claude to use "saha" in Turkish text; verified zero Turkish-inflected "site" strings in Python code
+- **Bug 4: Negative feedback wording** — unified 👎 response from write-specific "Ne olmalıydı? Lütfen doğru bilgiyi yazın." to "Nasıl daha iyi yapabilirdim?" which works for all interaction types
+
+### Tests
+- 13 new tests in `tests/test_bug_fixes_s6.py` (5 chain site_id, 4 site resolver collision, 2 saha terminology, 2 feedback wording)
+- 398 total tests passing
+
+## v1.7.1 — Live Sheet Alignment (2026-02-13)
+
+### Fixed (Priority 1 — Code Fixes)
+- **Stock tab `Last Verified` column** — added to `STOCK_COLUMNS` constant so appended rows land in the correct column
+- **Conditional formatting script** — 7 fixes to match live sheet:
+  - Stale verified (blue) now covers Hardware Inventory, Implementation Details, and Stock (was HW only)
+  - Stale ticket threshold corrected to 3 days (was 7), highlights full row A:M (was single column)
+  - Device type version rules now include Gateway (was Tag/Anchor only) with yellow severity (was red)
+  - Facility type conditional rules use red severity (was yellow)
+  - Support Log conditional rules added: root_cause (when status ≠ Open), resolution + resolved_date (when Resolved)
+  - `devices_affected` flagged as important (yellow)
+  - Stale verified rules include "Awaiting Installation" guard via `_ContractStatus` helper column
+- **`_SiteLabel` helper column blacklist** — `read_sites()` now strips helper columns (like `_SiteLabel`) via `_strip_helper_columns()`, matching behavior of `read_hardware()` and `read_support_log()`
+
+### Changed (Priority 2 — Manual Sheet Fixes)
+- Column order aligned across all tabs to match live Google Sheet
+- Missing helper columns (`_ContractStatus`, `_FacilityType`) added to relevant tabs
+- `Last Verified` column added to Stock tab in live sheet
+
+### Tests
+- 15 new conditional formatting tests (stale verified 3 tabs, stale ticket threshold, SL conditionals, devices_affected, Site Viewer data rules)
+- 1 new `test_sites_excludes_helper_columns` test for `_SiteLabel` filtering
+
 ## v1.7.0 — Validation, Feedback, and Sheet Migrations (2026-02-12)
 
 ### Added

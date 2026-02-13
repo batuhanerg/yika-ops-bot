@@ -68,8 +68,9 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
         "city",
         "country",
         "facility_type",
-        "go_live_date",
         "contract_status",
+        "supervisor_1",
+        "phone_1",
     ],
     "update_hardware": [
         "site_id",
