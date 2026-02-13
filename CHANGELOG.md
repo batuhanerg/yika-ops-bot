@@ -3,14 +3,14 @@
 ## v1.7.2 — Live Testing Bug Fixes (2026-02-13)
 
 ### Fixed
-- **Bug 1: Chain step loses site_id context** — `enforce_must_fields()` now removes fields from Claude's missing list when they're already present in data; `format_chain_input_prompt()` no longer lists site_id as required (it's always known in chain context)
+- **Bug 1: Chain step loses site_id context** — `enforce_must_fields()` now removes fields from Claude's missing list when they're already present in data; `format_chain_input_prompt()` no longer lists site_id as required (it's always known in chain context); chain input now injects `[Site: XXX] [Operation: ...]` prefix so Claude sees the site context; bulk hardware `entries` list satisfies `device_type`/`qty` must fields; implementation fields recognized by both snake_case and sheet column header keys (e.g. `"Internet Provider"` ↔ `internet_provider`)
 - **Bug 2: Este Nove resolving to wrong site** — site resolver's `by_customer` and `by_alias` indexes now store lists instead of overwriting on collision; alias fuzzy matching uses `fuzz.ratio` instead of `fuzz.partial_ratio` to prevent short aliases (e.g., "est") from outscoring full customer names
 - **Bug 3: "site" instead of "saha" in chain response** — added Turkish terminology rule to system prompt instructing Claude to use "saha" in Turkish text; verified zero Turkish-inflected "site" strings in Python code
 - **Bug 4: Negative feedback wording** — unified 👎 response from write-specific "Ne olmalıydı? Lütfen doğru bilgiyi yazın." to "Nasıl daha iyi yapabilirdim?" which works for all interaction types
 
 ### Tests
-- 13 new tests in `tests/test_bug_fixes_s6.py` (5 chain site_id, 4 site resolver collision, 2 saha terminology, 2 feedback wording)
-- 398 total tests passing
+- 23 new tests in `tests/test_bug_fixes_s6.py` (10 chain site_id + context injection + entries + impl keys, 4 site resolver collision, 2 saha terminology, 2 feedback wording, 5 impl key mapping)
+- 408 total tests passing
 
 ## v1.7.1 — Live Sheet Alignment (2026-02-13)
 
