@@ -146,11 +146,19 @@ def process_message(
     if existing_state and existing_state.get("messages"):
         thread_context = existing_state["messages"]
 
+    # Inject chain context into message so Claude knows the site and expected operation
+    parse_text = text
+    if existing_state and existing_state.get("awaiting_chain_input"):
+        chain_site_id = existing_state.get("data", {}).get("site_id", "")
+        chain_op = existing_state.get("operation", "")
+        if chain_site_id:
+            parse_text = f"[Site: {chain_site_id}] [Operation: {chain_op}]\n{text}"
+
     # Parse with Claude
     try:
         claude = get_claude()
         result = claude.parse_message(
-            message=text,
+            message=parse_text,
             sender_name=sender_name,
             thread_context=thread_context,
         )

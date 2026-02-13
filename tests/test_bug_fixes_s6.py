@@ -46,6 +46,140 @@ class TestBug1ChainSiteIdContext:
         assert "İnternet" in body_text or "SSID" in body_text
 
 
+class TestBug1ChainSiteIdInjection:
+    """Bug 1 part 2: Chain site_id must be injected into Claude context."""
+
+    def test_chain_input_prepends_site_context(self):
+        """When awaiting_chain_input, message sent to Claude should include site context."""
+        from unittest.mock import MagicMock, patch
+        from app.handlers.common import process_message, thread_store
+
+        thread_ts = "chain-site-inject-ts"
+        thread_store.set(thread_ts, {
+            "operation": "update_hardware",
+            "user_id": "U123",
+            "data": {"site_id": "TCO-TR-01"},
+            "missing_fields": [],
+            "awaiting_chain_input": True,
+            "chain_steps": ["create_site", "update_hardware", "update_implementation"],
+            "current_step": 2,
+            "total_steps": 3,
+            "completed_operations": [{"operation": "create_site", "readback": "", "ticket_id": None}],
+            "skipped_operations": [],
+            "pending_operations": [{"operation": "update_implementation", "data": {}}],
+            "raw_message": "yeni saha ekle",
+            "sender_name": "Batu",
+            "language": "tr",
+        })
+
+        # Mock Claude to capture what message it receives
+        mock_result = MagicMock()
+        mock_result.operation = "update_hardware"
+        mock_result.data = {"device_type": "Gateway", "qty": 5}
+        mock_result.missing_fields = []
+        mock_result.error = None
+        mock_result.warnings = None
+        mock_result.language = "tr"
+        mock_result.extra_operations = None
+
+        captured_messages = []
+
+        def capture_parse(message, sender_name, thread_context=None):
+            captured_messages.append(message)
+            return mock_result
+
+        say_mock = MagicMock()
+        client_mock = MagicMock()
+        client_mock.users_info.return_value = {"user": {"profile": {"display_name": "Batu"}}}
+
+        with patch("app.handlers.common.get_claude") as mock_get_claude, \
+             patch("app.handlers.common.get_sheets") as mock_get_sheets:
+            mock_claude_inst = MagicMock()
+            mock_claude_inst.parse_message = capture_parse
+            mock_get_claude.return_value = mock_claude_inst
+            mock_get_sheets.return_value = MagicMock()
+
+            process_message(
+                text="5 tane gateway var",
+                user_id="U123",
+                channel="C123",
+                thread_ts=thread_ts,
+                say=say_mock,
+                client=client_mock,
+                event_ts="evt-chain-inject",
+            )
+
+        thread_store.clear(thread_ts)
+
+        # The message sent to Claude should contain the site_id context
+        assert len(captured_messages) == 1
+        assert "TCO-TR-01" in captured_messages[0]
+
+    def test_chain_input_preserves_original_user_text(self):
+        """Site context prefix should not destroy the user's actual message."""
+        from unittest.mock import MagicMock, patch
+        from app.handlers.common import process_message, thread_store
+
+        thread_ts = "chain-preserve-ts"
+        thread_store.set(thread_ts, {
+            "operation": "update_hardware",
+            "user_id": "U123",
+            "data": {"site_id": "TCO-TR-01"},
+            "missing_fields": [],
+            "awaiting_chain_input": True,
+            "chain_steps": ["create_site", "update_hardware"],
+            "current_step": 2,
+            "total_steps": 2,
+            "completed_operations": [{"operation": "create_site", "readback": "", "ticket_id": None}],
+            "skipped_operations": [],
+            "pending_operations": [],
+            "raw_message": "test",
+            "sender_name": "Batu",
+            "language": "tr",
+        })
+
+        captured_messages = []
+        mock_result = MagicMock()
+        mock_result.operation = "update_hardware"
+        mock_result.data = {"device_type": "Tag", "qty": 32}
+        mock_result.missing_fields = []
+        mock_result.error = None
+        mock_result.warnings = None
+        mock_result.language = "tr"
+        mock_result.extra_operations = None
+
+        def capture_parse(message, sender_name, thread_context=None):
+            captured_messages.append(message)
+            return mock_result
+
+        say_mock = MagicMock()
+        client_mock = MagicMock()
+        client_mock.users_info.return_value = {"user": {"profile": {"display_name": "Batu"}}}
+
+        with patch("app.handlers.common.get_claude") as mock_get_claude, \
+             patch("app.handlers.common.get_sheets") as mock_get_sheets:
+            mock_claude_inst = MagicMock()
+            mock_claude_inst.parse_message = capture_parse
+            mock_get_claude.return_value = mock_claude_inst
+            mock_get_sheets.return_value = MagicMock()
+
+            process_message(
+                text="32 tag 13 anchor 2 gateway",
+                user_id="U123",
+                channel="C123",
+                thread_ts=thread_ts,
+                say=say_mock,
+                client=client_mock,
+                event_ts="evt-chain-preserve",
+            )
+
+        thread_store.clear(thread_ts)
+
+        assert len(captured_messages) == 1
+        assert "TCO-TR-01" in captured_messages[0]
+        assert "32 tag 13 anchor 2 gateway" in captured_messages[0]
+
+
 class TestBug2EsteNoveResolution:
     """Bug 2: 'este nove' should resolve to EST-TR-01, not EST-BR-09."""
 
