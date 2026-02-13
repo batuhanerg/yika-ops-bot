@@ -291,6 +291,68 @@ class TestBug3SahaTerm:
         assert "saha" in prompt.lower()
 
 
+class TestBug1ImplKeyMapping:
+    """Bug 1 part 4: Implementation data uses column header keys, not snake_case."""
+
+    def test_impl_column_header_keys_not_flagged_as_missing(self):
+        """Claude returns 'Internet Provider'/'SSID' — enforce should recognize them."""
+        data = {
+            "site_id": "TCO-TR-01",
+            "Internet Provider": "ERG Controls",
+            "SSID": "ERG-Net",
+        }
+        missing = enforce_must_fields("update_implementation", data, [])
+        assert "internet_provider" not in missing
+        assert "ssid" not in missing
+
+    def test_impl_snake_case_keys_still_work(self):
+        """Backward compat: snake_case keys should still be recognized."""
+        data = {
+            "site_id": "TCO-TR-01",
+            "internet_provider": "ERG Controls",
+            "ssid": "ERG-Net",
+        }
+        missing = enforce_must_fields("update_implementation", data, [])
+        assert "internet_provider" not in missing
+        assert "ssid" not in missing
+
+    def test_impl_missing_must_field_still_flagged(self):
+        """If neither snake_case nor column header key present, flag it."""
+        data = {"site_id": "TCO-TR-01", "SSID": "ERG-Net"}
+        missing = enforce_must_fields("update_implementation", data, [])
+        assert "internet_provider" in missing
+        assert "ssid" not in missing
+
+    def test_impl_claude_missing_with_column_header_present(self):
+        """Claude reports 'internet_provider' missing but data has 'Internet Provider'."""
+        data = {
+            "site_id": "TCO-TR-01",
+            "Internet Provider": "ERG Controls",
+            "SSID": "ERG-Net",
+        }
+        missing = enforce_must_fields("update_implementation", data, ["internet_provider", "ssid"])
+        assert "internet_provider" not in missing
+        assert "ssid" not in missing
+
+    def test_impl_facility_type_must_with_column_header_keys(self):
+        """Food facility must fields with column header keys should be recognized."""
+        data = {
+            "site_id": "TCO-TR-01",
+            "Internet Provider": "ERG Controls",
+            "SSID": "ERG-Net",
+            "Clean hygiene time": "20s",
+            "HP alert time": "30s",
+            "Hand hygiene time": "15s",
+            "Hand hygiene interval (dashboard)": "60",
+            "Hand hygiene type": "Soap",
+        }
+        missing = enforce_must_fields("update_implementation", data, [], facility_type="Food")
+        assert "internet_provider" not in missing
+        assert "ssid" not in missing
+        assert "clean_hygiene_time" not in missing
+        assert "hand_hygiene_time" not in missing
+
+
 class TestBug4FeedbackWording:
     """Bug 4: 👎 should say 'Nasıl daha iyi yapabilirdim?' for all interaction types."""
 

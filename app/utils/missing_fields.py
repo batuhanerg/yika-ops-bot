@@ -12,6 +12,28 @@ from __future__ import annotations
 from app.field_config.field_requirements import FIELD_REQUIREMENTS
 from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
 
+# snake_case → sheet column header for implementation fields.
+# Claude returns column header keys per system_prompt.md instruction.
+_IMPL_FIELD_TO_COLUMN: dict[str, str] = {
+    "internet_provider": "Internet Provider",
+    "ssid": "SSID",
+    "password": "Password",
+    "gateway_placement": "Gateway placement",
+    "charging_dock_placement": "Charging dock placement",
+    "dispenser_anchor_placement": "Dispenser anchor placement",
+    "handwash_time": "Handwash time",
+    "tag_buzzer_vibration": "Tag buzzer/vibration",
+    "entry_time": "Entry time",
+    "dispenser_anchor_power_type": "Dispenser anchor power type",
+    "clean_hygiene_time": "Clean hygiene time",
+    "hp_alert_time": "HP alert time",
+    "hand_hygiene_time": "Hand hygiene time",
+    "hand_hygiene_interval": "Hand hygiene interval (dashboard)",
+    "hand_hygiene_type": "Hand hygiene type",
+    "tag_clean_to_red_timeout": "Tag clean-to-red timeout",
+    "other_details": "Other details",
+}
+
 # Map operation → tab key in FIELD_REQUIREMENTS
 _OP_TO_TAB = {
     "log_support": "support_log",
@@ -104,6 +126,22 @@ def format_missing_fields_message(
     return "\n".join(lines), has_blockers
 
 
+def _data_has_field(data: dict, field: str, operation: str) -> bool:
+    """Check if data contains a field, considering column header aliases.
+
+    For update_implementation, Claude returns sheet column header keys
+    (e.g. "Internet Provider") while FIELD_REQUIREMENTS uses snake_case
+    (e.g. "internet_provider"). Check both.
+    """
+    if data.get(field):
+        return True
+    if operation in ("update_implementation",):
+        col = _IMPL_FIELD_TO_COLUMN.get(field)
+        if col and data.get(col):
+            return True
+    return False
+
+
 def enforce_must_fields(
     operation: str,
     data: dict,
@@ -121,7 +159,9 @@ def enforce_must_fields(
 
     req = FIELD_REQUIREMENTS[tab]
     # Start from Claude's list but remove fields that are actually present in data
-    missing: list[str] = [f for f in claude_missing if not data.get(f)]
+    missing: list[str] = [
+        f for f in claude_missing if not _data_has_field(data, f, operation)
+    ]
 
     # For bulk hardware, entries list satisfies device_type and qty
     entries = data.get("entries")
@@ -134,7 +174,7 @@ def enforce_must_fields(
     for field in req.get("must", []):
         if field in entries_satisfy:
             continue
-        if not data.get(field) and field not in missing:
+        if not _data_has_field(data, field, operation) and field not in missing:
             missing.append(field)
 
     # Check must_when_facility_type
@@ -142,7 +182,7 @@ def enforce_must_fields(
         facility_must = req.get("must_when_facility_type", {})
         if facility_type in facility_must:
             for field in facility_must[facility_type]:
-                if not data.get(field) and field not in missing:
+                if not _data_has_field(data, field, operation) and field not in missing:
                     missing.append(field)
 
     return missing
