@@ -170,26 +170,39 @@ def _build_add_rule_request(
     color: dict,
     rule_type: str = "blank",
     custom_formula: str | None = None,
+    first_col_letter: str = "A",
+    header_row: int = 1,
 ) -> dict:
-    """Build an addConditionalFormatRule request."""
+    """Build an addConditionalFormatRule request.
+
+    All rules use CUSTOM_FORMULA to include a "row has data" guard
+    (first column not empty), preventing empty rows from being highlighted.
+    """
+    data_row = header_row + 1  # First data row (e.g., row 2 or row 3)
+    col_letter = chr(ord("A") + col_index)
+
     if rule_type == "blank":
-        condition = {
-            "type": "BLANK",
-        }
+        # Empty cell AND row has data → color
+        formula = f'=AND(${first_col_letter}{data_row}<>"",{col_letter}{data_row}="")'
     elif rule_type == "custom" and custom_formula:
-        condition = {
-            "type": "CUSTOM_FORMULA",
-            "values": [{"userEnteredValue": custom_formula}],
-        }
+        # Wrap existing formula with row-has-data guard
+        # Strip leading = from the custom formula if present
+        inner = custom_formula.lstrip("=")
+        formula = f'=AND(${first_col_letter}{data_row}<>"",{inner})'
     else:
-        condition = {"type": "BLANK"}
+        formula = f'=AND(${first_col_letter}{data_row}<>"",{col_letter}{data_row}="")'
+
+    condition = {
+        "type": "CUSTOM_FORMULA",
+        "values": [{"userEnteredValue": formula}],
+    }
 
     return {
         "addConditionalFormatRule": {
             "rule": {
                 "ranges": [{
                     "sheetId": sheet_id,
-                    "startRowIndex": 1,  # Skip header row
+                    "startRowIndex": header_row,  # Skip header row(s)
                     "startColumnIndex": col_index,
                     "endColumnIndex": col_index + 1,
                 }],
@@ -240,6 +253,11 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
     # Note: To fully clear existing rules, use the Google Sheets UI.
     add_requests = []
 
+    # Determine the header row and first column letter for each tab
+    _tab_header_rows: dict[str, int] = {}
+    for tab_name in sheet_ids:
+        _tab_header_rows[tab_name] = 2 if tab_name == "Implementation Details" else 1
+
     for rule in rules:
         tab_name = rule["tab"]
         field_name = rule["field"]
@@ -252,32 +270,49 @@ def migrate(spreadsheet, dry_run: bool = False) -> list[dict] | None:
         sid = sheet_ids[tab_name]
         headers = sheet_headers.get(tab_name, [])
         col_idx = _find_col_index(headers, field_name)
+        hdr_row = _tab_header_rows.get(tab_name, 1)
 
         if col_idx is None:
             print(f"  WARNING: Column '{field_name}' not found in {tab_name}")
             continue
 
+        # First column with data (Site ID or Ticket ID) for the "row has data" guard
+        first_col = "A"  # All tabs have their key column in A
+
         if severity in ("must", "important"):
-            # Blank cell → color
+            # Blank cell AND row has data → color
             add_requests.append(
-                _build_add_rule_request(sid, col_idx, color, rule_type="blank")
+                _build_add_rule_request(
+                    sid, col_idx, color, rule_type="blank",
+                    first_col_letter=first_col, header_row=hdr_row,
+                )
             )
         elif severity == "stale_verified":
             # Last Verified > 30 days ago → blue
+            data_row = hdr_row + 1
             col_letter = chr(ord("A") + col_idx)
-            formula = f'=AND({col_letter}2<>"",TODAY()-{col_letter}2>30)'
+            formula = f'=AND({col_letter}{data_row}<>"",TODAY()-{col_letter}{data_row}>30)'
             add_requests.append(
-                _build_add_rule_request(sid, col_idx, color, rule_type="custom", custom_formula=formula)
+                _build_add_rule_request(
+                    sid, col_idx, color, rule_type="custom",
+                    custom_formula=formula,
+                    first_col_letter=first_col, header_row=hdr_row,
+                )
             )
         elif severity == "stale_ticket":
             # Status != Resolved AND Received Date > 7 days → orange
             status_idx = _find_col_index(headers, "Status")
             if status_idx is not None:
+                data_row = hdr_row + 1
                 col_letter = chr(ord("A") + col_idx)
                 status_letter = chr(ord("A") + status_idx)
-                formula = f'=AND({status_letter}2<>"Resolved",{col_letter}2<>"",TODAY()-{col_letter}2>7)'
+                formula = f'=AND({status_letter}{data_row}<>"Resolved",{col_letter}{data_row}<>"",TODAY()-{col_letter}{data_row}>7)'
                 add_requests.append(
-                    _build_add_rule_request(sid, col_idx, color, rule_type="custom", custom_formula=formula)
+                    _build_add_rule_request(
+                        sid, col_idx, color, rule_type="custom",
+                        custom_formula=formula,
+                        first_col_letter=first_col, header_row=hdr_row,
+                    )
                 )
 
     # Apply add requests

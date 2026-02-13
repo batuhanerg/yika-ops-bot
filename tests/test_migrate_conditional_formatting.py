@@ -260,3 +260,69 @@ class TestMigrate:
                 red_found = True
                 break
         assert red_found, "No red formatting rules found for must fields"
+
+    def test_all_rules_use_custom_formula(self):
+        """All rules should use CUSTOM_FORMULA (not BLANK) to skip empty rows."""
+        spreadsheet = self._make_spreadsheet()
+
+        migrate(spreadsheet)
+
+        all_calls = spreadsheet.batch_update.call_args_list
+        all_requests = []
+        for c in all_calls:
+            body = c[0][0] if c[0] else c[1].get("body", {})
+            all_requests.extend(body.get("requests", []))
+
+        add_rules = [r for r in all_requests if "addConditionalFormatRule" in r]
+        for rule in add_rules:
+            bool_rule = rule["addConditionalFormatRule"]["rule"]["booleanRule"]
+            condition = bool_rule["condition"]
+            assert condition["type"] == "CUSTOM_FORMULA", (
+                f"Expected CUSTOM_FORMULA, got {condition['type']}"
+            )
+
+    def test_blank_rules_include_row_has_data_guard(self):
+        """Must/important blank rules should check that first column is not empty."""
+        spreadsheet = self._make_spreadsheet()
+
+        migrate(spreadsheet)
+
+        all_calls = spreadsheet.batch_update.call_args_list
+        all_requests = []
+        for c in all_calls:
+            body = c[0][0] if c[0] else c[1].get("body", {})
+            all_requests.extend(body.get("requests", []))
+
+        add_rules = [r for r in all_requests if "addConditionalFormatRule" in r]
+        for rule in add_rules:
+            bool_rule = rule["addConditionalFormatRule"]["rule"]["booleanRule"]
+            condition = bool_rule["condition"]
+            formula = condition["values"][0]["userEnteredValue"]
+            # Every formula should contain $A (the first column guard)
+            assert "$A" in formula, f"Missing first-column guard in: {formula}"
+
+    def test_impl_details_header_row_2(self):
+        """Implementation Details should use header_row=2 (startRowIndex=2)."""
+        spreadsheet = self._make_spreadsheet()
+
+        migrate(spreadsheet)
+
+        all_calls = spreadsheet.batch_update.call_args_list
+        all_requests = []
+        for c in all_calls:
+            body = c[0][0] if c[0] else c[1].get("body", {})
+            all_requests.extend(body.get("requests", []))
+
+        add_rules = [r for r in all_requests if "addConditionalFormatRule" in r]
+        # Find rules for Implementation Details (sheet_id=2)
+        impl_rules = [
+            r for r in add_rules
+            if r["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"] == 2
+        ]
+        assert len(impl_rules) > 0
+        for rule in impl_rules:
+            start_row = rule["addConditionalFormatRule"]["rule"]["ranges"][0]["startRowIndex"]
+            assert start_row == 2, f"Impl Details rule should skip 2 header rows, got startRowIndex={start_row}"
+            # Formula should reference row 3 (first data row after header on row 2)
+            formula = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+            assert "3" in formula, f"Impl Details formula should reference row 3: {formula}"
