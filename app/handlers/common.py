@@ -220,6 +220,30 @@ def process_message(
 
     # Handle query (read-only, no confirmation needed)
     if result.operation == "query":
+        # Resolve site_id for queries (same logic as write operations)
+        q_site_id = result.data.get("site_id", "")
+        if q_site_id and not _is_valid_site_id_format(q_site_id):
+            resolver = _get_site_resolver()
+            matches = resolver.resolve(q_site_id)
+            if len(matches) == 0:
+                sheets = get_sheets()
+                all_sites = sheets.read_sites()
+                available = [s["Site ID"] for s in all_sites]
+                say(
+                    blocks=format_error_message("unknown_site", site_name=q_site_id, available_sites=available),
+                    thread_ts=thread_ts,
+                )
+                return
+            elif len(matches) == 1:
+                result.data["site_id"] = matches[0]["Site ID"]
+            else:
+                sites_text = "\n".join(f"• `{m['Site ID']}` — {m.get('Customer', '')}" for m in matches)
+                say(
+                    text=f"Birden fazla saha eşleşti. Hangisini kastediyorsunuz?\n{sites_text}",
+                    thread_ts=thread_ts,
+                )
+                return
+
         # Build conversation history for query context
         q_messages = thread_context or []
         q_messages.append({"role": "user", "content": f"[Sender: {sender_name}]\n{text}"})
@@ -273,7 +297,7 @@ def process_message(
             result.missing_fields.append(f)
 
     # Enforce FIELD_REQUIREMENTS must fields (catches fields Claude missed)
-    facility_type = result.data.get("facility_type")
+    facility_type = result.data.get("facility_type") or (existing_state.get("facility_type") if existing_state else None)
     if is_chain_input:
         logger.info("Chain pre-enforce: op=%s data_keys=%s missing=%s", result.operation, list(result.data.keys()), result.missing_fields)
     result.missing_fields = enforce_must_fields(
@@ -437,6 +461,7 @@ def process_message(
             "total_steps": existing_state.get("total_steps", 1),
             "completed_operations": existing_state.get("completed_operations", []),
             "skipped_operations": existing_state.get("skipped_operations", []),
+            "facility_type": existing_state.get("facility_type"),
         }
         if not pending_ops and existing_state.get("pending_operations"):
             pending_ops = existing_state["pending_operations"]

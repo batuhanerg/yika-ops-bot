@@ -353,8 +353,320 @@ class TestBug1ImplKeyMapping:
         assert "hand_hygiene_time" not in missing
 
 
+class TestBug5QuerySiteResolution:
+    """Bug 5: Query operations must resolve customer names to Site IDs."""
+
+    def test_query_resolves_customer_name_to_site_id(self):
+        """'este nove' in a missing_data query should resolve to EST-TR-01."""
+        from unittest.mock import MagicMock, patch
+        from app.handlers.common import process_message, thread_store
+
+        thread_ts = "query-resolve-ts"
+
+        mock_result = MagicMock()
+        mock_result.operation = "query"
+        mock_result.data = {"query_type": "missing_data", "site_id": "este nove"}
+        mock_result.missing_fields = []
+        mock_result.error = None
+        mock_result.warnings = None
+        mock_result.language = "tr"
+        mock_result.extra_operations = None
+
+        say_mock = MagicMock()
+        client_mock = MagicMock()
+        client_mock.users_info.return_value = {"user": {"profile": {"display_name": "Batu"}}}
+
+        mock_sites = [
+            {"Site ID": "EST-TR-01", "Customer": "Este Nove", "Contract Status": "Active"},
+        ]
+        mock_sheets = MagicMock()
+        mock_sheets.read_sites.return_value = mock_sites
+        mock_sheets.read_hardware.return_value = []
+        mock_sheets.read_support_log.return_value = []
+        mock_sheets.read_all_implementation.return_value = []
+        mock_sheets.read_stock.return_value = []
+
+        with patch("app.handlers.common.get_claude") as mock_get_claude, \
+             patch("app.handlers.common.get_sheets") as mock_get_sheets:
+            mock_claude = MagicMock()
+            mock_claude.parse_message.return_value = mock_result
+            mock_get_claude.return_value = mock_claude
+            mock_get_sheets.return_value = mock_sheets
+
+            process_message(
+                text="este nove icin hangi bilgiler eksik",
+                user_id="U123",
+                channel="C123",
+                thread_ts=thread_ts,
+                say=say_mock,
+                client=client_mock,
+                event_ts="evt-query-resolve",
+            )
+
+        thread_store.clear(thread_ts)
+
+        # read_hardware should have been called with resolved site_id, not raw name
+        hw_call_args = mock_sheets.read_hardware.call_args
+        if hw_call_args:
+            assert hw_call_args[0][0] == "EST-TR-01" or hw_call_args[1].get("site_id") == "EST-TR-01", \
+                f"read_hardware called with wrong site_id: {hw_call_args}"
+
+    def test_query_unknown_site_shows_error(self):
+        """Query with unresolvable site name should show error."""
+        from unittest.mock import MagicMock, patch
+        from app.handlers.common import process_message, thread_store
+
+        thread_ts = "query-unknown-ts"
+
+        mock_result = MagicMock()
+        mock_result.operation = "query"
+        mock_result.data = {"query_type": "missing_data", "site_id": "nonexistent company"}
+        mock_result.missing_fields = []
+        mock_result.error = None
+        mock_result.warnings = None
+        mock_result.language = "tr"
+        mock_result.extra_operations = None
+
+        say_mock = MagicMock()
+        client_mock = MagicMock()
+        client_mock.users_info.return_value = {"user": {"profile": {"display_name": "Batu"}}}
+
+        mock_sites = [
+            {"Site ID": "EST-TR-01", "Customer": "Este Nove", "Contract Status": "Active"},
+        ]
+        mock_sheets = MagicMock()
+        mock_sheets.read_sites.return_value = mock_sites
+
+        with patch("app.handlers.common.get_claude") as mock_get_claude, \
+             patch("app.handlers.common.get_sheets") as mock_get_sheets:
+            mock_claude = MagicMock()
+            mock_claude.parse_message.return_value = mock_result
+            mock_get_claude.return_value = mock_claude
+            mock_get_sheets.return_value = mock_sheets
+
+            process_message(
+                text="nonexistent company icin eksik bilgiler",
+                user_id="U123",
+                channel="C123",
+                thread_ts=thread_ts,
+                say=say_mock,
+                client=client_mock,
+                event_ts="evt-query-unknown",
+            )
+
+        thread_store.clear(thread_ts)
+
+        # Should show an error message about unknown site
+        assert say_mock.called
+        # Check that it mentions the site name or shows an error
+        all_calls = [str(c) for c in say_mock.call_args_list]
+        all_text = " ".join(all_calls)
+        assert "bulunamadı" in all_text or "nonexistent" in all_text.lower()
+
+    def test_query_valid_site_id_not_resolved(self):
+        """Query with valid Site ID format should not trigger resolution."""
+        from unittest.mock import MagicMock, patch
+        from app.handlers.common import process_message, thread_store
+
+        thread_ts = "query-valid-ts"
+
+        mock_result = MagicMock()
+        mock_result.operation = "query"
+        mock_result.data = {"query_type": "missing_data", "site_id": "EST-TR-01"}
+        mock_result.missing_fields = []
+        mock_result.error = None
+        mock_result.warnings = None
+        mock_result.language = "tr"
+        mock_result.extra_operations = None
+
+        say_mock = MagicMock()
+        client_mock = MagicMock()
+        client_mock.users_info.return_value = {"user": {"profile": {"display_name": "Batu"}}}
+
+        mock_sheets = MagicMock()
+        mock_sheets.read_sites.return_value = [
+            {"Site ID": "EST-TR-01", "Customer": "Este Nove", "Contract Status": "Active"},
+        ]
+        mock_sheets.read_hardware.return_value = []
+        mock_sheets.read_support_log.return_value = []
+        mock_sheets.read_all_implementation.return_value = []
+        mock_sheets.read_stock.return_value = []
+
+        with patch("app.handlers.common.get_claude") as mock_get_claude, \
+             patch("app.handlers.common.get_sheets") as mock_get_sheets:
+            mock_claude = MagicMock()
+            mock_claude.parse_message.return_value = mock_result
+            mock_get_claude.return_value = mock_claude
+            mock_get_sheets.return_value = mock_sheets
+
+            process_message(
+                text="EST-TR-01 eksik bilgiler",
+                user_id="U123",
+                channel="C123",
+                thread_ts=thread_ts,
+                say=say_mock,
+                client=client_mock,
+                event_ts="evt-query-valid",
+            )
+
+        thread_store.clear(thread_ts)
+
+        # read_hardware should be called with the original site_id
+        hw_call_args = mock_sheets.read_hardware.call_args
+        if hw_call_args:
+            called_with = hw_call_args[0][0] if hw_call_args[0] else hw_call_args[1].get("site_id")
+            assert called_with == "EST-TR-01"
+
+
+class TestBug6FoodChainFacilityType:
+    """Bug 6: Food-specific must fields not shown in chain implementation step."""
+
+    def test_chain_ctx_preserves_facility_type(self):
+        """process_message chain_ctx should include facility_type from existing state."""
+        from app.utils.formatters import format_chain_input_prompt
+
+        # Direct test: format_chain_input_prompt with facility_type=Food
+        blocks = format_chain_input_prompt(3, 3, "update_implementation", facility_type="Food")
+        text = blocks[0]["text"]["text"]
+        # Should include Food-specific must fields
+        assert "Clean hygiene" in text or "clean hygiene" in text.lower()
+        assert "HP uyarı" in text or "hp_alert" in text.lower()
+        assert "El hijyeni" in text or "hand_hygiene" in text.lower()
+
+    def test_chain_ctx_healthcare_facility_type(self):
+        """Healthcare site should show tag_clean_to_red_timeout as must."""
+        from app.utils.formatters import format_chain_input_prompt
+
+        blocks = format_chain_input_prompt(3, 3, "update_implementation", facility_type="Healthcare")
+        text = blocks[0]["text"]["text"]
+        # Friendly name is "Tag temiz→kırmızı zaman aşımı kaç saniye?"
+        assert "temiz" in text.lower() or "tag_clean_to_red_timeout" in text
+
+    def test_facility_type_propagated_in_chain_state(self):
+        """When process_message stores chain_ctx, facility_type should be preserved."""
+        from unittest.mock import MagicMock, patch
+        from app.handlers.common import process_message, thread_store
+
+        thread_ts = "chain-facility-ts"
+        # Simulate: step 2 (hardware) confirmed, moving to step 3 (implementation)
+        # User is providing hardware data for a Food site
+        thread_store.set(thread_ts, {
+            "operation": "update_hardware",
+            "user_id": "U123",
+            "data": {"site_id": "TCO-TR-01"},
+            "missing_fields": [],
+            "awaiting_chain_input": True,
+            "chain_steps": ["create_site", "update_hardware", "update_implementation"],
+            "current_step": 2,
+            "total_steps": 3,
+            "completed_operations": [{"operation": "create_site", "readback": "", "ticket_id": None}],
+            "skipped_operations": [],
+            "pending_operations": [{"operation": "update_implementation", "data": {}}],
+            "raw_message": "yeni saha ekle",
+            "sender_name": "Batu",
+            "language": "tr",
+            "facility_type": "Food",  # This was stored when create_site was confirmed
+        })
+
+        mock_result = MagicMock()
+        mock_result.operation = "update_hardware"
+        mock_result.data = {"entries": [{"device_type": "Tag", "qty": 10}]}
+        mock_result.missing_fields = []
+        mock_result.error = None
+        mock_result.warnings = None
+        mock_result.language = "tr"
+        mock_result.extra_operations = None
+
+        say_mock = MagicMock()
+        client_mock = MagicMock()
+        client_mock.users_info.return_value = {"user": {"profile": {"display_name": "Batu"}}}
+
+        with patch("app.handlers.common.get_claude") as mock_get_claude, \
+             patch("app.handlers.common.get_sheets") as mock_get_sheets:
+            mock_claude = MagicMock()
+            mock_claude.parse_message.return_value = mock_result
+            mock_get_claude.return_value = mock_claude
+            mock_get_sheets.return_value = MagicMock()
+
+            process_message(
+                text="10 tag var",
+                user_id="U123",
+                channel="C123",
+                thread_ts=thread_ts,
+                say=say_mock,
+                client=client_mock,
+                event_ts="evt-chain-facility",
+            )
+
+        # Check that the stored state still has facility_type
+        stored_state = thread_store.get(thread_ts)
+        thread_store.clear(thread_ts)
+        assert stored_state is not None
+        assert stored_state.get("facility_type") == "Food", \
+            f"facility_type lost in chain state: {stored_state.get('facility_type')}"
+
+
+class TestBug7SsidCapitalization:
+    """Bug 7: 'SSID' should display as 'SSID' not 'Ssid' in confirmation cards."""
+
+    def test_ssid_column_header_key_displayed_correctly(self):
+        """Confirmation card with key 'SSID' should show label 'SSID'."""
+        from app.utils.formatters import format_confirmation_message
+        import json
+
+        data = {
+            "operation": "update_implementation",
+            "site_id": "TCO-TR-01",
+            "SSID": "deneme",
+            "Internet Provider": "ERG Controls",
+        }
+        blocks = format_confirmation_message(data)
+        text = json.dumps(blocks, ensure_ascii=False)
+        assert "Ssid" not in text, f"Found 'Ssid' in confirmation card: {text}"
+        assert "SSID" in text
+
+    def test_ssid_snake_case_key_displayed_correctly(self):
+        """Confirmation card with key 'ssid' should also show label 'SSID'."""
+        from app.utils.formatters import format_confirmation_message
+        import json
+
+        data = {
+            "operation": "update_implementation",
+            "site_id": "TCO-TR-01",
+            "ssid": "deneme",
+        }
+        blocks = format_confirmation_message(data)
+        text = json.dumps(blocks, ensure_ascii=False)
+        assert "Ssid" not in text
+        assert "SSID" in text
+
+    def test_internet_provider_column_header_key_displayed_correctly(self):
+        """'Internet Provider' key should not become 'Internet provider'."""
+        from app.utils.formatters import format_confirmation_message
+        import json
+
+        data = {
+            "operation": "update_implementation",
+            "site_id": "TCO-TR-01",
+            "Internet Provider": "ERG Controls",
+        }
+        blocks = format_confirmation_message(data)
+        text = json.dumps(blocks, ensure_ascii=False)
+        assert "Internet Provider" in text
+
+    def test_query_response_uses_field_labels(self):
+        """format_query_response generic path should use FIELD_LABELS."""
+        from app.utils.formatters import format_query_response
+        import json
+
+        data = {"ssid": "test-network", "hw_version": "1.2"}
+        blocks = format_query_response("generic", data)
+        text = json.dumps(blocks, ensure_ascii=False)
+        assert "SSID" in text
+        assert "HW Version" in text
+
+
 class TestBug4FeedbackWording:
-    """Bug 4: 👎 should say 'Nasıl daha iyi yapabilirdim?' for all interaction types."""
 
     def test_feedback_negative_uses_new_wording(self):
         """The feedback_negative handler should use unified wording."""

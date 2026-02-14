@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.7.4 — Live Testing Bug Fixes Round 2 (2026-02-14)
+
+### Fixed
+- **Bug 5: Query site_id resolution** — query operations (missing_data, stale_data, etc.) now resolve customer names to Site IDs via `SiteResolver` before querying sheets; previously queries bypassed resolution and passed raw names like "este nove" directly to sheet lookups
+- **Bug 6: Food must fields missing in chain** — `facility_type` now propagates through chain state via `chain_ctx`; implementation step for Food sites correctly shows 5 food-specific must fields (clean_hygiene_time, hp_alert_time, etc.); `enforce_must_fields` also reads `facility_type` from existing thread state
+- **Bug 7: "Ssid" capitalization** — added column header key entries to `FIELD_LABELS` so Claude's implementation keys (e.g., `"SSID"`, `"Internet Provider"`) display correctly instead of being `.title()`-cased; also fixed `format_query_response()` to use `FIELD_LABELS`
+
+### Tests
+- 10 new tests (3 query resolution, 3 food/healthcare chain facility_type, 4 SSID/field label capitalization)
+- 418 total tests passing
+
 ## v1.7.2 — Live Testing Bug Fixes (2026-02-13)
 
 ### Fixed

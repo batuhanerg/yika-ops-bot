@@ -51,6 +51,24 @@ FIELD_LABELS: dict[str, str] = {
     "hand_hygiene_time": "Hand Hygiene Time",
     "hand_hygiene_interval": "Hand Hygiene Interval",
     "hand_hygiene_type": "Hand Hygiene Type",
+    # Column header keys (Claude returns these for implementation data)
+    "SSID": "SSID",
+    "Internet Provider": "Internet Provider",
+    "Password": "Password",
+    "Gateway placement": "Gateway Placement",
+    "Charging dock placement": "Charging Dock Placement",
+    "Dispenser anchor placement": "Dispenser Anchor Placement",
+    "Handwash time": "Handwash Time",
+    "Tag buzzer/vibration": "Tag Buzzer/Vibration",
+    "Entry time": "Entry Time",
+    "Dispenser anchor power type": "Dispenser Anchor Power Type",
+    "Clean hygiene time": "Clean Hygiene Time",
+    "HP alert time": "HP Alert Time",
+    "Hand hygiene time": "Hand Hygiene Time",
+    "Hand hygiene interval (dashboard)": "Hand Hygiene Interval",
+    "Hand hygiene type": "Hand Hygiene Type",
+    "Tag clean-to-red timeout": "Tag Clean-to-Red Timeout",
+    "Other details": "Other Details",
 }
 
 OPERATION_TITLES: dict[str, str] = {
@@ -177,7 +195,7 @@ def format_query_response(query_type: str, data: dict[str, Any]) -> list[dict]:
         })
         fields = []
         for key, value in data.items():
-            label = key.replace("_", " ").title()
+            label = FIELD_LABELS.get(key, key.replace("_", " ").title())
             fields.append({"type": "mrkdwn", "text": f"*{label}:*\n{value}"})
         if fields:
             blocks.append({"type": "section", "fields": fields[:10]})
