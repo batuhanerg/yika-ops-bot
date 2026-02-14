@@ -140,7 +140,7 @@ class SheetsService:
             key = next((k for k, v in _SITES_KEY_MAP.items() if v == col), None)
             mapped_row.append(data.get(key, "") if key else "")
         mapped_row = [_sanitize_cell(v) for v in mapped_row]
-        self._ws("Sites").append_row(mapped_row, value_input_option="USER_ENTERED")
+        self._ws("Sites").append_row(mapped_row, value_input_option="USER_ENTERED", table_range="A1:Q1")
 
     def update_site(self, site_id: str, updates: dict[str, Any]) -> None:
         ws = self._ws("Sites")
@@ -168,7 +168,7 @@ class SheetsService:
             key = next((k for k, v in _HARDWARE_KEY_MAP.items() if v == col), None)
             row.append(data.get(key, "") if key else "")
         row = [_sanitize_cell(v) for v in row]
-        self._ws("Hardware Inventory").append_row(row, value_input_option="USER_ENTERED")
+        self._ws("Hardware Inventory").append_row(row, value_input_option="USER_ENTERED", table_range="A1:G1")
 
     # --- Implementation Details ---
 
@@ -217,7 +217,7 @@ class SheetsService:
             for col_name, value in updates.items():
                 if col_name in headers:
                     new_row[headers.index(col_name)] = value
-            ws.append_row(new_row, value_input_option="USER_ENTERED")
+            ws.append_row(new_row, value_input_option="USER_ENTERED", table_range="A1")
         else:
             for col_name, value in updates.items():
                 if col_name in headers:
@@ -263,7 +263,7 @@ class SheetsService:
                 val = ", ".join(str(v) for v in val)
             row.append(val)
         row = [_sanitize_cell(v) for v in row]
-        self._ws("Support Log").append_row(row, value_input_option="USER_ENTERED")
+        self._ws("Support Log").append_row(row, value_input_option="USER_ENTERED", table_range="A1:M1")
         return ticket_id
 
     def find_support_log_row(self, site_id: str | None = None, ticket_id: str | None = None) -> int | None:
@@ -344,7 +344,7 @@ class SheetsService:
             key = col.lower().replace(" ", "_").replace("-", "_")
             row.append(data.get(key, ""))
         row = [_sanitize_cell(v) for v in row]
-        self._ws("Stock").append_row(row, value_input_option="USER_ENTERED")
+        self._ws("Stock").append_row(row, value_input_option="USER_ENTERED", table_range="A1:I1")
 
     def update_stock(self, row_index: int, updates: dict[str, Any]) -> None:
         ws = self._ws("Stock")
@@ -367,7 +367,7 @@ class SheetsService:
     ) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
         row = [_sanitize_cell(v) for v in [timestamp, user, operation, target_tab, site_id, summary, raw_message]]
-        self._ws("Audit Log").append_row(row, value_input_option="USER_ENTERED")
+        self._ws("Audit Log").append_row(row, value_input_option="USER_ENTERED", table_range="A1:G1")
 
     # --- Feedback ---
 
@@ -383,4 +383,4 @@ class SheetsService:
     ) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
         row = [_sanitize_cell(v) for v in [timestamp, user, operation, site_id, ticket_id, rating, expected_behavior, original_message]]
-        self._ws("Feedback").append_row(row, value_input_option="USER_ENTERED")
+        self._ws("Feedback").append_row(row, value_input_option="USER_ENTERED", table_range="A1:H1")

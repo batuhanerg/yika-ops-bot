@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.7.5 — Live Testing Bug Fixes Round 3 (2026-02-14)
+
+### Fixed
+- **Bug 8: Hardware bulk write column offset** — all `append_row()` calls now pass `table_range` parameter to constrain table detection to actual data columns (A-G for hardware, A-Q for sites, etc.); prevents Google Sheets API from detecting helper columns (H+) as part of the table and misplacing bulk entry rows
+- **Bug 9: Implementation dropdown fields** — new `IMPLEMENTATION_DROPDOWNS` config with valid options for Internet Provider, Hand hygiene type, and Tag buzzer/vibration; `format_missing_fields_message()` and `format_chain_input_prompt()` now show "Seçenekler: ..." for dropdown fields; `validate_impl_dropdown()` supports exact, case-insensitive, and fuzzy matching
+- **Bug 10: English Thingsboard attribute names** — friendly field prompts now use English attribute names (e.g., "Clean hygiene time değeri kaç saniye?" instead of "Clean hygiene süresi kaç saniye?") since technicians need to recognize these from the Thingsboard dashboard
+- **Bug 11: Field descriptions for technicians** — new `FIELD_DESCRIPTIONS` config with Turkish explanations for all implementation fields; descriptions are shown alongside English attribute names in missing field prompts and chain input prompts (e.g., "HP alert time değeri kaç saniye? — HP bölgesi içindeyken badge'in yeşilden kırmızıya dönme süresi")
+
+### Added
+- `app/field_config/field_options.py` — dropdown options config + fuzzy validation
+- `app/field_config/field_descriptions.py` — Turkish field descriptions for technicians
+
+### Tests
+- 27 new tests (5 bulk write + table_range, 9 dropdown validation, 7 English attribute names, 6 field descriptions)
+- 445 total tests passing
+
 ## v1.7.4 — Live Testing Bug Fixes Round 2 (2026-02-14)
 
 ### Fixed

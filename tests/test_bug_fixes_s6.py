@@ -528,10 +528,10 @@ class TestBug6FoodChainFacilityType:
         # Direct test: format_chain_input_prompt with facility_type=Food
         blocks = format_chain_input_prompt(3, 3, "update_implementation", facility_type="Food")
         text = blocks[0]["text"]["text"]
-        # Should include Food-specific must fields
-        assert "Clean hygiene" in text or "clean hygiene" in text.lower()
-        assert "HP uyarı" in text or "hp_alert" in text.lower()
-        assert "El hijyeni" in text or "hand_hygiene" in text.lower()
+        # Should include Food-specific must fields (English attribute names)
+        assert "Clean hygiene time" in text
+        assert "HP alert time" in text
+        assert "Hand hygiene time" in text
 
     def test_chain_ctx_healthcare_facility_type(self):
         """Healthcare site should show tag_clean_to_red_timeout as must."""
@@ -539,8 +539,8 @@ class TestBug6FoodChainFacilityType:
 
         blocks = format_chain_input_prompt(3, 3, "update_implementation", facility_type="Healthcare")
         text = blocks[0]["text"]["text"]
-        # Friendly name is "Tag temiz→kırmızı zaman aşımı kaç saniye?"
-        assert "temiz" in text.lower() or "tag_clean_to_red_timeout" in text
+        # Friendly name uses English: "Tag clean-to-red timeout değeri kaç saniye?"
+        assert "clean-to-red timeout" in text.lower()
 
     def test_facility_type_propagated_in_chain_state(self):
         """When process_message stores chain_ctx, facility_type should be preserved."""
@@ -683,3 +683,344 @@ class TestBug4FeedbackWording:
         source = inspect.getsource(actions.register)
         assert "Ne olmalıydı" not in source, \
             "Old write-specific wording 'Ne olmalıydı' should be removed"
+
+
+class TestBug8HardwareBulkWriteColumnOffset:
+    """Bug 8: Bulk hardware writes must each be a new row in A-G, never past column G."""
+
+    def test_append_hardware_row_has_exactly_7_elements(self):
+        """Each append_hardware call should produce a row with exactly 7 values (A-G)."""
+        from unittest.mock import MagicMock, patch
+        from app.services.sheets import SheetsService, HARDWARE_COLUMNS
+
+        mock_ws = MagicMock()
+        svc = object.__new__(SheetsService)
+        svc._ws_cache = {"Hardware Inventory": mock_ws}
+
+        svc.append_hardware({"site_id": "TCO-TR-01", "device_type": "Tag", "qty": 10})
+
+        mock_ws.append_row.assert_called_once()
+        row = mock_ws.append_row.call_args[0][0]
+        assert len(row) == len(HARDWARE_COLUMNS) == 7, \
+            f"Row should have exactly 7 elements (A-G), got {len(row)}"
+
+    def test_append_hardware_uses_table_range(self):
+        """append_hardware must pass table_range to constrain append to columns A-G."""
+        from unittest.mock import MagicMock
+        from app.services.sheets import SheetsService
+
+        mock_ws = MagicMock()
+        svc = object.__new__(SheetsService)
+        svc._ws_cache = {"Hardware Inventory": mock_ws}
+
+        svc.append_hardware({"site_id": "TCO-TR-01", "device_type": "Tag", "qty": 10})
+
+        call_kwargs = mock_ws.append_row.call_args[1]
+        assert "table_range" in call_kwargs, \
+            "append_row must specify table_range to prevent helper column interference"
+        assert call_kwargs["table_range"] == "A1:G1", \
+            f"table_range should be 'A1:G1', got '{call_kwargs['table_range']}'"
+
+    def test_bulk_write_3_entries_produces_3_separate_rows(self):
+        """Bulk hardware with 3 entries should call append_hardware 3 times."""
+        from unittest.mock import MagicMock, patch
+        from app.services.sheets import SheetsService
+
+        mock_ws = MagicMock()
+        svc = object.__new__(SheetsService)
+        svc._ws_cache = {"Hardware Inventory": mock_ws}
+
+        entries = [
+            {"device_type": "Tag", "qty": 10},
+            {"device_type": "Anchor", "qty": 15},
+            {"device_type": "Gateway", "qty": 1},
+        ]
+        for entry in entries:
+            entry["site_id"] = "TCO-TR-01"
+            svc.append_hardware(entry)
+
+        assert mock_ws.append_row.call_count == 3, \
+            f"Expected 3 append_row calls, got {mock_ws.append_row.call_count}"
+
+        # Each call should have exactly 7 elements and table_range
+        for i, call in enumerate(mock_ws.append_row.call_args_list):
+            row = call[0][0]
+            assert len(row) == 7, f"Entry {i+1} row has {len(row)} elements, expected 7"
+            assert call[1].get("table_range") == "A1:G1", \
+                f"Entry {i+1} missing table_range='A1:G1'"
+
+    def test_single_entry_write_correct_columns(self):
+        """Single hardware entry should write Site ID, Device Type, ..., Notes in A-G."""
+        from unittest.mock import MagicMock
+        from app.services.sheets import SheetsService
+
+        mock_ws = MagicMock()
+        svc = object.__new__(SheetsService)
+        svc._ws_cache = {"Hardware Inventory": mock_ws}
+
+        svc.append_hardware({
+            "site_id": "TCO-TR-01",
+            "device_type": "Gateway",
+            "hw_version": "2.0",
+            "fw_version": "3.1",
+            "qty": 1,
+            "notes": "Main gateway",
+        })
+
+        row = mock_ws.append_row.call_args[0][0]
+        assert row[0] == "TCO-TR-01"   # A: Site ID
+        assert row[1] == "Gateway"      # B: Device Type
+        assert row[2] == "2.0"          # C: HW Version
+        assert row[3] == "3.1"          # D: FW Version
+        assert row[4] == 1             # E: Qty
+        assert row[6] == "Main gateway" # G: Notes
+
+    def test_all_append_methods_use_table_range(self):
+        """All append/create methods should use table_range to prevent column drift."""
+        from unittest.mock import MagicMock
+        from app.services.sheets import SheetsService
+
+        svc = object.__new__(SheetsService)
+        mock_ws = MagicMock()
+        svc._ws_cache = {
+            "Sites": mock_ws,
+            "Hardware Inventory": mock_ws,
+            "Support Log": mock_ws,
+            "Stock": mock_ws,
+            "Audit Log": mock_ws,
+        }
+
+        # Test each append method
+        svc.create_site({"site_id": "X", "customer": "Test"})
+        assert mock_ws.append_row.call_args[1].get("table_range"), \
+            "create_site must use table_range"
+        mock_ws.reset_mock()
+
+        svc.append_hardware({"site_id": "X", "device_type": "Tag", "qty": 1})
+        assert mock_ws.append_row.call_args[1].get("table_range"), \
+            "append_hardware must use table_range"
+        mock_ws.reset_mock()
+
+        svc.append_support_log({"site_id": "X", "type": "Visit", "status": "Open",
+                                "issue_summary": "Test", "responsible": "Batu",
+                                "received_date": "2026-02-14"})
+        assert mock_ws.append_row.call_args[1].get("table_range"), \
+            "append_support_log must use table_range"
+        mock_ws.reset_mock()
+
+        svc.append_stock({"location": "Istanbul", "device_type": "Tag", "qty": 5, "condition": "New"})
+        assert mock_ws.append_row.call_args[1].get("table_range"), \
+            "append_stock must use table_range"
+
+
+class TestBug9ImplementationDropdowns:
+    """Bug 9: Implementation dropdown fields must be validated and shown in prompts."""
+
+    def test_implementation_dropdowns_config_exists(self):
+        """IMPLEMENTATION_DROPDOWNS config should define valid options."""
+        from app.field_config.field_options import IMPLEMENTATION_DROPDOWNS
+
+        assert "Internet Provider" in IMPLEMENTATION_DROPDOWNS
+        assert "Hand hygiene type" in IMPLEMENTATION_DROPDOWNS
+        assert "Tag buzzer/vibration" in IMPLEMENTATION_DROPDOWNS
+
+    def test_dropdown_options_have_values(self):
+        """Each dropdown should have at least 2 options."""
+        from app.field_config.field_options import IMPLEMENTATION_DROPDOWNS
+
+        for field, options in IMPLEMENTATION_DROPDOWNS.items():
+            assert len(options) >= 2, f"{field} should have at least 2 options, got {len(options)}"
+
+    def test_missing_fields_message_shows_dropdown_options(self):
+        """When a dropdown field is missing, prompt should include 'Seçenekler: ...'"""
+        from app.utils.missing_fields import format_missing_fields_message
+
+        msg, _ = format_missing_fields_message(
+            ["hand_hygiene_type"], "update_implementation", language="tr"
+        )
+        assert "Seçenekler:" in msg or "seçenekler:" in msg.lower(), \
+            f"Dropdown field prompt should include options, got: {msg}"
+
+    def test_missing_fields_message_non_dropdown_no_options(self):
+        """Non-dropdown fields should NOT show 'Seçenekler:'."""
+        from app.utils.missing_fields import format_missing_fields_message
+
+        msg, _ = format_missing_fields_message(
+            ["ssid"], "update_implementation", language="tr"
+        )
+        assert "Seçenekler:" not in msg, \
+            f"Non-dropdown field should not show options, got: {msg}"
+
+    def test_chain_input_prompt_shows_dropdown_options(self):
+        """format_chain_input_prompt should show options for dropdown fields."""
+        from app.utils.formatters import format_chain_input_prompt
+
+        blocks = format_chain_input_prompt(3, 3, "update_implementation")
+        text = blocks[0]["text"]["text"]
+        # internet_provider is a must field with dropdown
+        assert "ERG Controls" in text or "Müşteri" in text, \
+            f"Chain prompt should show Internet Provider options, got: {text}"
+
+    def test_validate_dropdown_exact_match(self):
+        """Exact match for dropdown value should pass."""
+        from app.field_config.field_options import validate_impl_dropdown
+
+        result = validate_impl_dropdown("Hand hygiene type", "Tek adımlı (sadece sabun)")
+        assert result is not None
+        assert result == "Tek adımlı (sadece sabun)"
+
+    def test_validate_dropdown_fuzzy_match(self):
+        """Fuzzy match should resolve to correct option."""
+        from app.field_config.field_options import validate_impl_dropdown
+
+        result = validate_impl_dropdown("Hand hygiene type", "iki adımlı")
+        assert result is not None
+        assert "İki adımlı" in result
+
+    def test_validate_dropdown_no_match(self):
+        """No match should return None."""
+        from app.field_config.field_options import validate_impl_dropdown
+
+        result = validate_impl_dropdown("Hand hygiene type", "üç adımlı yok böyle bişey")
+        assert result is None
+
+    def test_validate_dropdown_unknown_field(self):
+        """Non-dropdown field should return the value as-is."""
+        from app.field_config.field_options import validate_impl_dropdown
+
+        result = validate_impl_dropdown("SSID", "my-network")
+        assert result == "my-network"
+
+
+class TestBug10EnglishAttributeNames:
+    """Bug 10: Thingsboard attribute names must stay in English in friendly prompts."""
+
+    def test_clean_hygiene_time_uses_english_name(self):
+        """clean_hygiene_time prompt should contain 'Clean hygiene time', not Turkish."""
+        from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+        text = FRIENDLY_FIELD_MAP["clean_hygiene_time"]
+        assert "Clean hygiene time" in text, f"Should contain English name, got: {text}"
+
+    def test_hp_alert_time_uses_english_name(self):
+        """hp_alert_time prompt should contain 'HP alert time', not Turkish."""
+        from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+        text = FRIENDLY_FIELD_MAP["hp_alert_time"]
+        assert "HP alert time" in text, f"Should contain English name, got: {text}"
+
+    def test_hand_hygiene_time_uses_english_name(self):
+        """hand_hygiene_time prompt should contain 'Hand hygiene time'."""
+        from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+        text = FRIENDLY_FIELD_MAP["hand_hygiene_time"]
+        assert "Hand hygiene time" in text, f"Should contain English name, got: {text}"
+
+    def test_hand_hygiene_interval_uses_english_name(self):
+        """hand_hygiene_interval prompt should contain 'Hand hygiene interval'."""
+        from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+        text = FRIENDLY_FIELD_MAP["hand_hygiene_interval"]
+        assert "Hand hygiene interval" in text, f"Should contain English name, got: {text}"
+
+    def test_hand_hygiene_type_uses_english_name(self):
+        """hand_hygiene_type prompt should contain 'Hand hygiene type'."""
+        from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+        text = FRIENDLY_FIELD_MAP["hand_hygiene_type"]
+        assert "Hand hygiene type" in text, f"Should contain English name, got: {text}"
+
+    def test_tag_clean_to_red_uses_english_name(self):
+        """tag_clean_to_red_timeout prompt should contain 'Tag clean-to-red timeout'."""
+        from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+        text = FRIENDLY_FIELD_MAP["tag_clean_to_red_timeout"]
+        assert "Tag clean-to-red timeout" in text, f"Should contain English name, got: {text}"
+
+    def test_no_turkish_translation_of_attribute_names(self):
+        """Friendly fields should not contain Turkish translations of attribute names."""
+        from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
+
+        # These Turkish translations should NOT appear
+        turkish_bad = ["hijyen süresi", "hijyeni süresi", "hijyeni aralığı", "hijyeni türü",
+                        "uyarı süresi", "temiz→kırmızı"]
+        for field in ["clean_hygiene_time", "hp_alert_time", "hand_hygiene_time",
+                       "hand_hygiene_interval", "hand_hygiene_type", "tag_clean_to_red_timeout"]:
+            text = FRIENDLY_FIELD_MAP[field]
+            for bad in turkish_bad:
+                assert bad not in text, \
+                    f"Field '{field}' should not contain Turkish translation '{bad}', got: {text}"
+
+
+class TestBug11FieldDescriptions:
+    """Bug 11: Implementation fields should have Turkish descriptions for technicians."""
+
+    def test_field_descriptions_config_exists(self):
+        """FIELD_DESCRIPTIONS should exist with all implementation fields."""
+        from app.field_config.field_descriptions import FIELD_DESCRIPTIONS
+
+        impl_fields = [
+            "clean_hygiene_time", "hp_alert_time", "hand_hygiene_time",
+            "hand_hygiene_interval", "hand_hygiene_type", "tag_clean_to_red_timeout",
+            "handwash_time", "entry_time", "gateway_placement",
+            "charging_dock_placement", "dispenser_anchor_placement",
+            "dispenser_anchor_power_type", "tag_buzzer_vibration",
+            "internet_provider", "ssid", "password",
+        ]
+        for field in impl_fields:
+            assert field in FIELD_DESCRIPTIONS, \
+                f"FIELD_DESCRIPTIONS missing '{field}'"
+
+    def test_descriptions_are_in_turkish(self):
+        """Descriptions should be in Turkish (contain Turkish characters)."""
+        from app.field_config.field_descriptions import FIELD_DESCRIPTIONS
+
+        # At least some descriptions should have Turkish chars
+        all_text = " ".join(FIELD_DESCRIPTIONS.values())
+        assert any(c in all_text for c in "çğıöşüÇĞİÖŞÜ"), \
+            "Descriptions should be in Turkish"
+
+    def test_missing_fields_message_includes_description(self):
+        """Implementation field prompts should include description."""
+        from app.utils.missing_fields import format_missing_fields_message
+
+        msg, _ = format_missing_fields_message(
+            ["clean_hygiene_time"], "update_implementation", language="tr"
+        )
+        # Should include the description text (Turkish explanation)
+        assert "badge" in msg.lower() or "kırmızı" in msg.lower() or "HP" in msg, \
+            f"Missing field prompt should include description, got: {msg}"
+
+    def test_chain_input_prompt_includes_description(self):
+        """format_chain_input_prompt should show description for impl fields."""
+        from app.utils.formatters import format_chain_input_prompt
+
+        blocks = format_chain_input_prompt(3, 3, "update_implementation", facility_type="Food")
+        text = blocks[0]["text"]["text"]
+        # Clean hygiene time description mentions badge and kırmızı
+        assert "badge" in text.lower() or "kırmızı" in text.lower(), \
+            f"Chain prompt should include field description, got: {text}"
+
+    def test_non_implementation_fields_no_description(self):
+        """Sites, hardware, support log fields should NOT get descriptions."""
+        from app.utils.missing_fields import format_missing_fields_message
+
+        msg, _ = format_missing_fields_message(
+            ["customer"], "create_site", language="tr"
+        )
+        # Sites field should just have friendly question, no long description
+        assert len(msg) < 200, \
+            f"Non-implementation field should not have long description, got: {msg}"
+
+    def test_dropdown_field_shows_description_and_options(self):
+        """Dropdown impl field should show: English name + description + options."""
+        from app.utils.missing_fields import format_missing_fields_message
+
+        msg, _ = format_missing_fields_message(
+            ["hand_hygiene_type"], "update_implementation", language="tr"
+        )
+        # Should have English name, description, AND options
+        assert "Hand hygiene type" in msg, f"Should have English name, got: {msg}"
+        assert "Seçenekler:" in msg, f"Should have dropdown options, got: {msg}"
+        assert "hijyen" in msg.lower() or "sabun" in msg.lower(), \
+            f"Should have Turkish description, got: {msg}"

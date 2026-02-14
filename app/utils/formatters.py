@@ -476,6 +476,8 @@ def format_chain_input_prompt(
     Includes must/important field hints from FIELD_REQUIREMENTS.
     """
     from app.utils.missing_fields import _OP_TO_TAB
+    from app.field_config.field_descriptions import get_field_description
+    from app.field_config.field_options import get_dropdown_options
     from app.field_config.field_requirements import FIELD_REQUIREMENTS
     from app.field_config.friendly_fields import FRIENDLY_FIELD_MAP
 
@@ -504,13 +506,29 @@ def format_chain_input_prompt(
             field_lines.append("Kaydı oluşturabilmem için şu bilgiler gerekli:")
             for f in must_fields:
                 question = FRIENDLY_FIELD_MAP.get(f, f)
-                field_lines.append(f"  • {question}")
+                desc = get_field_description(f, operation)
+                if desc:
+                    line = f"  • {question} — {desc}"
+                else:
+                    line = f"  • {question}"
+                opts = get_dropdown_options(f)
+                if opts:
+                    line += f" Seçenekler: {', '.join(opts)}"
+                field_lines.append(line)
 
         if important_fields:
             field_lines.append("Kaydı zenginleştirmek için şunlar da faydalı olur:")
             for f in important_fields:
                 question = FRIENDLY_FIELD_MAP.get(f, f)
-                field_lines.append(f"  • {question}")
+                desc = get_field_description(f, operation)
+                if desc:
+                    line = f"  • {question} — {desc}"
+                else:
+                    line = f"  • {question}"
+                opts = get_dropdown_options(f)
+                if opts:
+                    line += f" Seçenekler: {', '.join(opts)}"
+                field_lines.append(line)
 
     field_text = "\n".join(field_lines)
     body = f"📝 *Adım {step}/{total} — {label}*"
