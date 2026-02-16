@@ -62,6 +62,26 @@ def _get_skipped_tabs(contract_status: str) -> set[str]:
     return set()
 
 
+def _is_ghost_row(row: dict[str, Any], meaningful_keys: tuple[str, ...]) -> bool:
+    """Return True if row has empty Site ID and no meaningful data."""
+    if row.get("Site ID"):
+        return False
+    return all(not row.get(k) for k in meaningful_keys)
+
+
+def _is_orphan_row(row: dict[str, Any], meaningful_keys: tuple[str, ...]) -> bool:
+    """Return True if row has empty Site ID but has real data."""
+    if row.get("Site ID"):
+        return False
+    return any(bool(row.get(k)) for k in meaningful_keys)
+
+
+_HW_MEANINGFUL = ("Device Type", "Qty", "HW Version", "FW Version")
+_IMPL_MEANINGFUL = ("Internet Provider", "SSID", "Password", "Gateway placement")
+_SUPPORT_MEANINGFUL = ("Ticket ID", "Status", "Root Cause", "Resolution", "Issue Summary")
+_STOCK_MEANINGFUL = ("Location", "Device Type", "Qty", "Condition")
+
+
 def find_missing_data(
     sites: list[dict[str, Any]],
     hardware: list[dict[str, Any]],
@@ -113,7 +133,18 @@ def find_missing_data(
     # --- Hardware Inventory tab ---
     hw_req = FIELD_REQUIREMENTS["hardware_inventory"]
     for hw in filtered_hw:
-        sid = hw["Site ID"]
+        sid = hw.get("Site ID", "")
+        if not sid:
+            if _is_ghost_row(hw, _HW_MEANINGFUL):
+                continue
+            if _is_orphan_row(hw, _HW_MEANINGFUL):
+                device = hw.get("Device Type", "?")
+                issues.append({
+                    "site_id": "", "tab": "Hardware Inventory", "field": "Site ID",
+                    "detail": f"Site ID eksik: Hardware — {device} kaydı sahipsiz",
+                    "severity": "must",
+                })
+                continue
         if "hardware_inventory" in site_skip_tabs.get(sid, set()):
             continue
         device = hw.get("Device Type", "?")
@@ -133,7 +164,18 @@ def find_missing_data(
     # --- Support Log tab ---
     sup_req = FIELD_REQUIREMENTS["support_log"]
     for entry in filtered_support:
-        sid = entry["Site ID"]
+        sid = entry.get("Site ID", "")
+        if not sid:
+            if _is_ghost_row(entry, _SUPPORT_MEANINGFUL):
+                continue
+            if _is_orphan_row(entry, _SUPPORT_MEANINGFUL):
+                ticket = entry.get("Ticket ID", "?")
+                issues.append({
+                    "site_id": "", "tab": "Support Log", "field": "Site ID",
+                    "detail": f"Site ID eksik: Support Log — {ticket} kaydı sahipsiz",
+                    "severity": "must",
+                })
+                continue
         if "support_log" in site_skip_tabs.get(sid, set()):
             continue
         ticket = entry.get("Ticket ID", "?")
@@ -182,7 +224,17 @@ def find_missing_data(
             if site_id else implementation
         )
         for impl in filtered_impl:
-            sid = impl.get("Site ID", "?")
+            sid = impl.get("Site ID", "")
+            if not sid:
+                if _is_ghost_row(impl, _IMPL_MEANINGFUL):
+                    continue
+                if _is_orphan_row(impl, _IMPL_MEANINGFUL):
+                    issues.append({
+                        "site_id": "", "tab": "Implementation Details", "field": "Site ID",
+                        "detail": "Site ID eksik: Implementation Details kaydı sahipsiz",
+                        "severity": "must",
+                    })
+                    continue
             if "implementation_details" in site_skip_tabs.get(sid, set()):
                 continue
             ftype = site_facility.get(sid, "")
@@ -214,7 +266,7 @@ def find_missing_data(
                         })
 
     # --- Cross-tab checks: sites with no hardware records ---
-    hw_sites = {h["Site ID"] for h in hardware}
+    hw_sites = {h.get("Site ID", "") for h in hardware} - {""}
     for site in filtered_sites:
         sid = site["Site ID"]
         if "hardware_inventory" in site_skip_tabs.get(sid, set()):
@@ -242,6 +294,8 @@ def find_missing_data(
     stock_req = FIELD_REQUIREMENTS["stock"]
     if stock is not None:
         for item in stock:
+            if _is_ghost_row(item, _STOCK_MEANINGFUL):
+                continue
             loc = item.get("Location", "?")
             device = item.get("Device Type", "?")
             label = f"{loc}/{device}"
@@ -264,7 +318,9 @@ def find_missing_data(
 
     # --- Open ticket aging (>3 days, status ≠ Resolved) ---
     for entry in filtered_support:
-        sid = entry["Site ID"]
+        sid = entry.get("Site ID", "")
+        if not sid:
+            continue
         if "support_log" in site_skip_tabs.get(sid, set()):
             continue
         status = entry.get("Status", "")
@@ -307,7 +363,12 @@ def find_stale_data(
     filtered_impl = [i for i in implementation if i.get("Site ID") == site_id] if site_id else implementation
 
     for hw in filtered_hw:
-        sid = hw["Site ID"]
+        sid = hw.get("Site ID", "")
+        if not sid:
+            if _is_ghost_row(hw, _HW_MEANINGFUL):
+                continue
+            # Orphan rows with data are flagged in find_missing_data, skip stale check
+            continue
         device = hw.get("Device Type", "?")
         last_verified = hw.get("Last Verified", "")
         if not last_verified:
@@ -331,7 +392,11 @@ def find_stale_data(
                 })
 
     for impl in filtered_impl:
-        sid = impl.get("Site ID", "?")
+        sid = impl.get("Site ID", "")
+        if not sid:
+            if _is_ghost_row(impl, _IMPL_MEANINGFUL):
+                continue
+            continue
         last_verified = impl.get("Last Verified", "")
         if not last_verified:
             issues.append({
@@ -356,6 +421,8 @@ def find_stale_data(
     # --- Stock ---
     if stock is not None:
         for item in stock:
+            if _is_ghost_row(item, _STOCK_MEANINGFUL):
+                continue
             loc = item.get("Location", "?")
             device = item.get("Device Type", "?")
             label = f"{loc}/{device}"

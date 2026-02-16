@@ -565,6 +565,127 @@ class TestStaleDataStock:
         assert len(stock_issues) == 1
 
 
+class TestGhostAndOrphanRows:
+    """Test ghost row skipping and orphan row flagging (Bug A)."""
+
+    def test_ghost_hw_row_skipped_in_missing_data(self):
+        """Hardware row with empty Site ID and empty everything else → skipped."""
+        hardware = [
+            {"Site ID": "", "Device Type": "", "Qty": "", "HW Version": "",
+             "FW Version": "", "Last Verified": "", "Notes": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=hardware, support=[])
+        assert len(result) == 0
+
+    def test_orphan_hw_row_flagged_as_must(self):
+        """Hardware row with empty Site ID but real data → flagged as 🔴 orphan."""
+        hardware = [
+            {"Site ID": "", "Device Type": "Tag", "Qty": 20, "HW Version": "",
+             "FW Version": "", "Last Verified": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=hardware, support=[])
+        orphan_issues = [r for r in result if "sahipsiz" in r.get("detail", "")]
+        assert len(orphan_issues) == 1
+        assert orphan_issues[0]["severity"] == "must"
+        assert "Tag" in orphan_issues[0]["detail"]
+
+    def test_ghost_hw_row_skipped_in_stale_data(self):
+        """Ghost hardware row skipped in stale data check too."""
+        hardware = [
+            {"Site ID": "", "Device Type": "", "Qty": "", "HW Version": "",
+             "FW Version": "", "Last Verified": ""},
+        ]
+        result = find_stale_data(hardware=hardware, implementation=[])
+        assert len(result) == 0
+
+    def test_ghost_impl_row_skipped(self):
+        """Implementation row with empty Site ID and empty fields → skipped."""
+        impl = [
+            {"Site ID": "", "Internet Provider": "", "SSID": "", "Password": "",
+             "Last Verified": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=[], implementation=impl)
+        impl_issues = [r for r in result if r.get("tab") == "Implementation Details"]
+        assert len(impl_issues) == 0
+
+    def test_ghost_impl_row_skipped_in_stale_data(self):
+        """Ghost implementation row skipped in stale data check."""
+        impl = [
+            {"Site ID": "", "Internet Provider": "", "SSID": "", "Last Verified": ""},
+        ]
+        result = find_stale_data(hardware=[], implementation=impl)
+        assert len(result) == 0
+
+    def test_ghost_support_row_skipped(self):
+        """Support row with empty Site ID and empty fields → skipped."""
+        support = [
+            {"Site ID": "", "Ticket ID": "", "Status": "", "Root Cause": "",
+             "Resolution": "", "Received Date": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=support)
+        sup_issues = [r for r in result if r.get("tab") == "Support Log"]
+        assert len(sup_issues) == 0
+
+    def test_ghost_stock_row_skipped(self):
+        """Stock row with empty everything → skipped."""
+        stock = [
+            {"Location": "", "Device Type": "", "Qty": "", "Condition": "",
+             "HW Version": "", "FW Version": "", "Last Verified": ""},
+        ]
+        result = find_missing_data(sites=[], hardware=[], support=[], stock=stock)
+        stock_issues = [r for r in result if r.get("tab") == "Stock"]
+        assert len(stock_issues) == 0
+
+    def test_ghost_stock_row_skipped_in_stale_data(self):
+        """Ghost stock row skipped in stale data check."""
+        stock = [
+            {"Location": "", "Device Type": "", "Qty": "", "Last Verified": ""},
+        ]
+        result = find_stale_data(hardware=[], implementation=[], stock=stock)
+        assert len(result) == 0
+
+    def test_ghost_rows_dont_appear_in_weekly_report(self):
+        """Ghost rows produce no lines in the weekly report."""
+        from app.services.scheduled_reports import generate_weekly_report
+        sites = [
+            {"Site ID": "ASM-TR-01", "Customer": "Anadolu", "City": "Gebze",
+             "Country": "TR", "Facility Type": "Healthcare",
+             "Contract Status": "Active", "Supervisor 1": "Ali", "Phone 1": "555"},
+        ]
+        ghost_hw = [
+            {"Site ID": "", "Device Type": "", "Qty": "", "HW Version": "",
+             "FW Version": "", "Last Verified": ""},
+        ]
+        blocks, _ = generate_weekly_report(
+            sites=sites, hardware=ghost_hw, support=[],
+            implementation=[], stock=[],
+        )
+        text = json.dumps(blocks, ensure_ascii=False)
+        # Ghost row should NOT produce any "• :" line with empty site
+        assert "• :" not in text
+        assert "• : " not in text
+
+    def test_orphan_rows_appear_in_must_section(self):
+        """Orphan rows appear in 🔴 section with sahipsiz label."""
+        from app.services.scheduled_reports import generate_weekly_report
+        sites = [
+            {"Site ID": "ASM-TR-01", "Customer": "Anadolu", "City": "Gebze",
+             "Country": "TR", "Facility Type": "Healthcare",
+             "Contract Status": "Active", "Supervisor 1": "Ali", "Phone 1": "555"},
+        ]
+        orphan_hw = [
+            {"Site ID": "", "Device Type": "Tag", "Qty": 20, "HW Version": "",
+             "FW Version": "", "Last Verified": ""},
+        ]
+        blocks, _ = generate_weekly_report(
+            sites=sites, hardware=orphan_hw, support=[],
+            implementation=[], stock=[],
+        )
+        text = json.dumps(blocks, ensure_ascii=False)
+        assert "🔴" in text
+        assert "sahipsiz" in text
+
+
 class TestDataQualityQueryWiring:
     """Test that _handle_query correctly routes missing_data and stale_data."""
 

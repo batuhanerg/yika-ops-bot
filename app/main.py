@@ -7,12 +7,19 @@ import os
 import threading
 
 from dotenv import load_dotenv
+from flask import Flask, request
 from slack_bolt import App
-from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_bolt.adapter.flask import SlackRequestHandler
 
 from app.handlers import actions, mentions, messages
+from app.routes.cron import cron_bp
 from app.utils.formatters import format_help_text
-from app.version import __version__, RELEASE_NOTES
+from app.version import (
+    __version__,
+    RELEASE_NOTES,
+    format_deploy_message,
+    get_release_notes_for_current_version,
+)
 
 load_dotenv()
 
@@ -52,7 +59,32 @@ def create_app() -> App:
     return app
 
 
-def _announce_version(app: App) -> None:
+def create_flask_app() -> Flask:
+    """Create a Flask app that wraps Bolt and adds cron routes."""
+    bolt_app = create_app()
+    handler = SlackRequestHandler(bolt_app)
+
+    flask_app = Flask(__name__)
+
+    # Health check for Cloud Run
+    @flask_app.route("/health", methods=["GET"])
+    @flask_app.route("/", methods=["GET"])
+    def health():
+        return "ok", 200
+
+    # Slack events — all Bolt traffic goes through root path
+    @flask_app.route("/slack/events", methods=["POST"])
+    @flask_app.route("/", methods=["POST"])
+    def slack_events():
+        return handler.handle(request)
+
+    # Cron routes
+    flask_app.register_blueprint(cron_bp)
+
+    return flask_app
+
+
+def _announce_version(bolt_app: App) -> None:
     """Post a version announcement if this version hasn't been announced yet."""
     channel = os.environ.get("SLACK_ANNOUNCE_CHANNEL", "")
     if not channel:
@@ -70,11 +102,15 @@ def _announce_version(app: App) -> None:
                 logger.info("Version v%s already announced, skipping", __version__)
                 return
 
-        # Build the announcement message
-        notes = "\n".join(f"• {note}" for note in RELEASE_NOTES)
-        message = f"Yeni versiyona geçtim: *v{__version__}* 🚀\n\n{notes}"
+        # Build the announcement message — prefer CHANGELOG RELEASE_NOTES
+        changelog_notes = get_release_notes_for_current_version()
+        message = format_deploy_message(
+            __version__,
+            changelog_notes,
+            fallback_bullets=RELEASE_NOTES,
+        )
 
-        app.client.chat_postMessage(channel=channel, text=message)
+        bolt_app.client.chat_postMessage(channel=channel, text=message)
 
         # Log the deploy to Audit Log
         sheets.append_audit_log(
@@ -92,15 +128,18 @@ def _announce_version(app: App) -> None:
 
 
 def main() -> None:
-    """Run the app with HTTP server (for Cloud Run / ngrok)."""
-    app = create_app()
+    """Run the app with Flask HTTP server (for Cloud Run / ngrok)."""
+    flask_app = create_flask_app()
 
     # Announce version in background (don't block startup)
-    threading.Thread(target=_announce_version, args=(app,), daemon=True).start()
+    # Access the Bolt app from the Flask context isn't needed for announce —
+    # it uses its own Slack client via Bolt.
+    bolt_app = create_app()
+    threading.Thread(target=_announce_version, args=(bolt_app,), daemon=True).start()
 
     port = int(os.environ.get("PORT", "8080"))
-    logger.info("Starting Mustafa v%s on port %d", __version__, port)
-    app.start(port=port)
+    logger.info("Starting Mustafa v%s on port %d (Flask)", __version__, port)
+    flask_app.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

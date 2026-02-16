@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 
 import gspread
 from google.oauth2.service_account import Credentials
+
+logger = logging.getLogger(__name__)
 
 # Column order for each tab (used when appending rows)
 SITES_COLUMNS = [
@@ -99,6 +102,19 @@ def _sanitize_cell(value: Any) -> Any:
     return value
 
 
+_VERSION_FIELDS = {"hw_version", "fw_version"}
+
+
+def _normalize_version_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """Strip leading 'v'/'V' prefix from HW Version and FW Version values."""
+    result = dict(data)
+    for key in _VERSION_FIELDS:
+        val = result.get(key)
+        if isinstance(val, str) and val:
+            result[key] = val.lstrip("vV")
+    return result
+
+
 def _strip_helper_columns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove helper columns (starting with '_') from record dicts."""
     return [
@@ -162,7 +178,60 @@ class SheetsService:
             return [r for r in records if r["Site ID"] == site_id]
         return records
 
+    def find_hardware_row(
+        self, site_id: str, device_type: str, hw_version: str | None = None,
+    ) -> tuple[int, dict[str, Any]] | None:
+        """Find an existing hardware row by Site ID + Device Type + optional HW Version.
+
+        If hw_version is provided, matches all three columns.
+        If hw_version is None, matches Site ID + Device Type only when there's
+        exactly one matching row.  Returns None if multiple rows match (ambiguous).
+
+        Returns (1-based row index, row data as dict) or None if not found.
+        """
+        ws = self._ws("Hardware Inventory")
+        all_values = ws.get_all_values()
+        if len(all_values) < 2:
+            return None
+        headers = all_values[0]
+        site_col = headers.index("Site ID")
+        type_col = headers.index("Device Type")
+        ver_col = headers.index("HW Version")
+        dt_lower = device_type.lower()
+
+        if hw_version is not None:
+            # Exact three-column match
+            for row_idx, row in enumerate(all_values[1:], start=2):
+                if (row[site_col] == site_id
+                        and row[type_col].lower() == dt_lower
+                        and row[ver_col] == hw_version):
+                    row_data = {headers[i]: row[i] for i in range(len(headers)) if i < len(row)}
+                    return row_idx, row_data
+            return None
+
+        # No version specified — match Site ID + Device Type, but only if unique
+        matches: list[tuple[int, dict[str, Any]]] = []
+        for row_idx, row in enumerate(all_values[1:], start=2):
+            if row[site_col] == site_id and row[type_col].lower() == dt_lower:
+                row_data = {headers[i]: row[i] for i in range(len(headers)) if i < len(row)}
+                matches.append((row_idx, row_data))
+
+        if len(matches) == 1:
+            return matches[0]
+        # 0 matches or >1 (ambiguous) → None
+        return None
+
+    def update_hardware_row(self, row_index: int, updates: dict[str, Any]) -> None:
+        """Update specific cells in a hardware row by column name."""
+        ws = self._ws("Hardware Inventory")
+        headers = HARDWARE_COLUMNS
+        for col_name, value in updates.items():
+            if col_name in headers:
+                col_idx = headers.index(col_name) + 1
+                ws.update_cell(row_index, col_idx, value)
+
     def append_hardware(self, data: dict[str, Any]) -> None:
+        data = _normalize_version_fields(data)
         row = []
         for col in HARDWARE_COLUMNS:
             key = next((k for k, v in _HARDWARE_KEY_MAP.items() if v == col), None)
@@ -339,12 +408,27 @@ class SheetsService:
         return records
 
     def append_stock(self, data: dict[str, Any]) -> None:
+        data = _normalize_version_fields(data)
         row = []
         for col in STOCK_COLUMNS:
             key = col.lower().replace(" ", "_").replace("-", "_")
             row.append(data.get(key, ""))
         row = [_sanitize_cell(v) for v in row]
         self._ws("Stock").append_row(row, value_input_option="USER_ENTERED", table_range="A1:I1")
+
+    def find_stock_row_index(self, location: str, device_type: str) -> int | None:
+        """Find the 1-based row index for a stock entry by location and device type."""
+        ws = self._ws("Stock")
+        all_values = ws.get_all_values()
+        if len(all_values) < 2:
+            return None
+        headers = all_values[0]
+        loc_col = headers.index("Location")
+        type_col = headers.index("Device Type")
+        for row_idx, row in enumerate(all_values[1:], start=2):
+            if row[loc_col] == location and row[type_col] == device_type:
+                return row_idx
+        return None
 
     def update_stock(self, row_index: int, updates: dict[str, Any]) -> None:
         ws = self._ws("Stock")
@@ -368,6 +452,21 @@ class SheetsService:
         timestamp = datetime.now(timezone.utc).isoformat()
         row = [_sanitize_cell(v) for v in [timestamp, user, operation, target_tab, site_id, summary, raw_message]]
         self._ws("Audit Log").append_row(row, value_input_option="USER_ENTERED", table_range="A1:G1")
+
+    def read_latest_audit_by_operation(self, operation: str) -> str | None:
+        """Find the most recent Audit Log entry for the given operation.
+
+        Returns the Summary column value, or None if not found.
+        """
+        ws = self._ws("Audit Log")
+        all_values = ws.get_all_values()
+        if len(all_values) < 2:
+            return None
+        # Operation is column C (index 2), Summary is column F (index 5)
+        for row in reversed(all_values[1:]):
+            if len(row) >= 6 and row[2] == operation:
+                return row[5]
+        return None
 
     # --- Feedback ---
 

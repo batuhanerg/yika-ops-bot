@@ -89,8 +89,69 @@ CHAIN_LABELS: dict[str, str] = {
     "update_stock": "stok",
 }
 
-# Fields to skip in confirmation display
-_SKIP_FIELDS = {"operation", "entries", "_future_date_warning", "_row_index"}
+# Fields to skip in confirmation display (including internal annotations)
+_SKIP_FIELDS = {
+    "operation", "entries", "_future_date_warning", "_row_index",
+    "_existing_qty", "_qty_mode", "_existing_row",
+    "_ambiguous_versions", "_available_versions",
+}
+
+
+def _format_hw_entry_label(entry: dict[str, Any]) -> str:
+    """Format a single hardware entry for the confirmation card.
+
+    If enriched with _existing_qty, shows update context:
+      "Tag (3.6.1): 32 → 37 (5 eklendi)"
+    If new row:
+      "Tag (3.6.2) x5 (yeni kayıt)"
+    If ambiguous versions:
+      "Tag x3 — sürüm belirtilmedi (mevcut: 3.6.1, 3.6.2)"
+    """
+    dt = entry.get("device_type", "?")
+    qty = int(entry.get("qty", 0))
+    existing_qty = entry.get("_existing_qty")
+    qty_mode = entry.get("_qty_mode")
+    hw_version = entry.get("hw_version")
+
+    # Build device label with optional version
+    dt_label = f"{dt} ({hw_version})" if hw_version else dt
+
+    # Ambiguous: multiple versions exist but user didn't specify
+    if entry.get("_ambiguous_versions"):
+        versions = entry.get("_available_versions", [])
+        ver_str = ", ".join(versions)
+        return f"{dt} x{qty} — sürüm belirtilmedi (mevcut: {ver_str})"
+
+    # Enriched entry — show before/after
+    if existing_qty is not None and qty_mode is not None:
+        if qty_mode == "add":
+            new_qty = existing_qty + qty
+            change = f"{qty} eklendi"
+        elif qty_mode == "subtract":
+            new_qty = existing_qty - qty
+            change = f"{qty} çıkarıldı"
+        else:  # set
+            new_qty = qty
+            change = "güncellendi"
+
+        label = f"{dt_label}: {existing_qty} → {new_qty} ({change})"
+        if new_qty < 0:
+            label += " ⚠️"
+        return label
+
+    # New row or not enriched — classic format
+    if existing_qty is None and qty_mode is not None:
+        parts = [f"{dt_label} x{qty} (yeni kayıt)"]
+    else:
+        parts = [f"{dt_label} x{qty}"]
+
+    if entry.get("hw_version"):
+        parts.append(f"HW:{entry['hw_version']}")
+    if entry.get("fw_version"):
+        parts.append(f"FW:{entry['fw_version']}")
+    if entry.get("notes"):
+        parts.append(f"({entry['notes']})")
+    return " ".join(parts)
 
 
 def format_confirmation_message(data: dict[str, Any], step_info: tuple[int, int] | None = None) -> list[dict]:
@@ -119,17 +180,11 @@ def format_confirmation_message(data: dict[str, Any], step_info: tuple[int, int]
         label = FIELD_LABELS.get(key, key.replace("_", " ").title())
         fields.append({"type": "mrkdwn", "text": f"*{label}:*\n{value}"})
 
-    # Handle bulk hardware entries
+    # Handle bulk hardware entries (with upsert context if enriched)
     if "entries" in data and data["entries"]:
         for i, entry in enumerate(data["entries"], 1):
-            parts = [f"{entry.get('device_type', '?')} x{entry.get('qty', '?')}"]
-            if entry.get("hw_version"):
-                parts.append(f"HW:{entry['hw_version']}")
-            if entry.get("fw_version"):
-                parts.append(f"FW:{entry['fw_version']}")
-            if entry.get("notes"):
-                parts.append(f"({entry['notes']})")
-            fields.append({"type": "mrkdwn", "text": f"*Item {i}:*\n{' '.join(parts)}"})
+            label = _format_hw_entry_label(entry)
+            fields.append({"type": "mrkdwn", "text": f"*Item {i}:*\n{label}"})
 
     # Slack limits 10 fields per section — split if needed
     for i in range(0, len(fields), 10):
@@ -378,7 +433,12 @@ def format_feedback_buttons(context: str = "write") -> list[dict]:
 
     context: "write" for after writes, "query" for after query responses.
     """
-    question = "Faydalı oldu mu?" if context == "query" else "Doğru kaydedildi mi?"
+    if context == "query":
+        question = "Faydalı oldu mu?"
+    elif context == "report":
+        question = "Bu rapor faydalı oldu mu?"
+    else:
+        question = "Doğru kaydedildi mi?"
     return [
         {
             "type": "section",

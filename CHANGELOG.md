@@ -1,6 +1,183 @@
 # Changelog
 
+## v1.8.6 — Version-Aware Hardware Upsert (2026-02-16)
+
+<!-- RELEASE_NOTES v1.8.6
+✨ Artık farklı donanım sürümleri ayrı satırda tutuluyor — "3.6.2 sürüm tag ekledim" dediğinizde 3.6.1 satırını değil, 3.6.2 satırını güncelliyor.
+✨ Onay kartında sürüm bilgisi görünüyor: "Tag (3.6.1): 32 → 35 (3 eklendi)".
+🔧 Sürüm belirtmeden bir cihaz eklediğinizde ve birden fazla sürüm varsa, hangi sürüm olduğunu soruyorum.
+🗑️ Gereksiz debug logları temizlendi.
+-->
+
+### Added
+- **Version-aware hardware upsert** — `find_hardware_row` now matches on Site ID + Device Type + HW Version. Different versions of the same device type are kept as separate rows.
+- **Ambiguous version detection** — when user doesn't specify a version and multiple rows exist for the same device type, enrichment marks the entry as ambiguous and the confirmation card lists available versions.
+- **Version in confirmation card** — update labels now include version: "Tag (3.6.1): 32 → 35 (3 eklendi)", new version rows show "Tag (3.6.2) x3 (yeni kayit)"
+
+### Fixed
+- Removed verbose diagnostic logging from revision 00041 (dedup, handler, enrichment, upsert)
+- Restored clean INFO-level logging for normal operations
+
+### Tests
+- 15 new tests: version-aware find_hardware_row (6), version-aware enrichment (4), version in confirmation card (3), version-aware upsert write (2)
+- 637 total tests passing
+
+## v1.8.5 — Hardware Upsert + Fuzzy Stock Location Matching (2026-02-15)
+
+<!-- RELEASE_NOTES v1.8.5
+✨ Artık "ASM'ye 5 tag ekledim" dediğinizde var olan satırı güncelliyorum — yeni satır açmıyorum (örn: 32 → 37).
+✨ Onay kartında "Tag: 32 → 37 (5 eklendi)" şeklinde ne değişeceğini gösteriyorum.
+🔧 Daha önce stok depo adını tam yazmak gerekiyordu — artık "Istanbuldan geldi" veya "İstanbul" yazmanız yeterli.
+🔧 Stoktan çıkarma ("5 tag çıkardım") ve mutlak set ("32 tag var") de doğru çalışıyor.
+-->
+
+### Added
+- **Hardware upsert** — `update_hardware` now checks for existing rows by Site ID + Device Type (case-insensitive). If found, updates qty in place instead of appending a duplicate row. Supports three modes: add (ekledim), subtract (çıkardım), and absolute set (X var).
+- **Confirmation card shows upsert context** — "Tag: 32 → 37 (5 eklendi)" for updates, "Gateway x3 (yeni kayıt)" for new rows, negative qty warning with ⚠️
+- `SheetsService.find_hardware_row(site_id, device_type)` — returns (row_index, row_data) or None
+- `SheetsService.update_hardware_row(row_index, updates)` — updates specific cells in place
+- `enrich_hardware_entries()` — annotates data with existing row info before confirmation
+- **Fuzzy stock location matching** — Turkish suffix stripping (-dan, -den, -tan, -ten, 'dan, 'den, etc.) and İ/ı normalization. "Istanbuldan geldi", "İstanbul", "adanadan" all match correctly.
+- Ambiguous location matches now ask for clarification instead of failing silently
+
+### Fixed
+- Existing HW/FW Version and Notes are preserved on upsert unless user explicitly provides new values
+- Stock prompt location matching now handles Turkish suffixes and İ/I variants
+
+### Tests
+- 29 new tests in `tests/test_hardware_upsert.py` (find_hardware_row, update_hardware_row, qty mode detection, enrichment, upsert write, confirmation card)
+- 14 new tests in `tests/test_fuzzy_location.py` (suffix stripping, İ normalization, ambiguous matches, integration)
+- 622 total tests passing
+
+## v1.8.4 — Stock Prompt After Hardware Writes + Version Normalization (2026-02-15)
+
+<!-- RELEASE_NOTES v1.8.4
+✨ Artık donanım envanterine cihaz eklediğinizde stok güncellemesi yapıp yapmayacağınızı soruyorum — hangi depodan geldiğini yazmanız yeterli.
+🔧 Daha önce HW/FW Version alanına "v3.6.0" yazılınca "v" ile kaydediliyordu — artık otomatik temizliyorum.
+-->
+
+### Added
+- **Stock prompt after hardware writes** — after confirming a hardware inventory write that includes device quantities, a follow-up prompt asks if stock should be updated. User replies with warehouse name to update stock, or "hayır" to skip. Handles device removal (reverse direction), negative stock warning, and unknown locations.
+- `SheetsService.find_stock_row_index()` — finds stock row by location and device type
+
+### Fixed
+- **HW/FW Version normalization** — strips leading `v`/`V` prefix on write (`"v3.6.0"` → `"3.6.0"`)
+- One-time cleanup script `scripts/normalize_versions.py` cleaned 18 existing cells in live sheet
+- `_should_ask_stock` now only triggers for `log_support` (hardware uses the new dedicated stock prompt)
+- Feedback handlers preserve stock prompt state when clearing thread
+
+### Tests
+- 18 new tests in `tests/test_stock_prompt.py` (triggering, state, reply handling, edge cases, sheets helper)
+- 9 new tests in `tests/test_version_normalize.py` (normalization, append_hardware, append_stock)
+- 579 total tests passing
+
+## v1.8.3 — Fix Deploy Message in Docker (2026-02-15)
+
+<!-- RELEASE_NOTES v1.8.3
+🔧 Daha önce yeni versiyonda ne değiştiğini anlatırken eski bilgileri gösteriyordum — artık güncel notları okuyorum.
+-->
+
+### Fixed
+- **CHANGELOG.md missing from Docker image** — `.dockerignore` had `*.md` which excluded `CHANGELOG.md`; added `!CHANGELOG.md` exception and `COPY CHANGELOG.md .` to Dockerfile
+- **Stale fallback bullets** — removed hardcoded v1.8.0 release notes from `RELEASE_NOTES` in `version.py`; empty fallback now shows clean version-only message instead of outdated content
+
+### Tests
+- 5 new tests in `tests/test_deploy_message.py` (empty fallback, path resolution, Dockerfile/dockerignore checks, live parsing)
+- 552 total tests passing
+
+## v1.8.2 — Feedback Button UX Fix (2026-02-15)
+
+<!-- RELEASE_NOTES v1.8.2
+🔧 Daha önce 👍/👎 butonuna bastığınızda butonlar hâlâ tıklanabilir görünüyordu — artık seçiminiz sabit metin olarak gösteriliyor.
+-->
+
+### Fixed
+- **Feedback buttons replaced with static text after click** — after clicking 👍 or 👎 on any feedback prompt, the original message is updated via `client.chat_update()` to replace the interactive buttons with a static context block showing the selection ("👍 Evet olarak değerlendirildi" or "👎 Hayır olarak değerlendirildi")
+- **Graceful fallback** — if `chat_update` fails (message too old, permissions), the error is logged but the feedback response is still sent normally
+
+### Tests
+- 14 new tests in `tests/test_feedback_button_update.py` (button replacement, content preservation, failure handling, regressions)
+- 547 total tests passing
+
+## v1.8.1 — Human-Readable Deployment Messages (2026-02-15)
+
+<!-- RELEASE_NOTES v1.8.1
+🔧 Daha önce versiyon mesajları teknik ve robotik görünüyordu — artık takıma anlaşılır şekilde anlatıyorum.
+✨ Artık her versiyon için Türkçe özet var — ne değişti, neyi fark edeceksiniz.
+-->
+
+### Changed
+- **Deployment messages now human-readable** — `_announce_version()` parses `<!-- RELEASE_NOTES vX.Y.Z -->` blocks from `CHANGELOG.md` instead of using hardcoded bullet points from `version.py`
+- **Conversational format** — deploy message now reads "Merhaba! Birkaç iyileştirme yaptım (vX.Y.Z):" with release notes, closing with "Bir sorun yaşarsanız bana yazın! 💬"
+- **Fallback preserved** — if no RELEASE_NOTES block exists for current version, falls back to old `RELEASE_NOTES` list in `version.py`
+
+### Added
+- `parse_release_notes()` — extracts RELEASE_NOTES from CHANGELOG content for a given version (max 5 entries)
+- `format_deploy_message()` — formats conversational Slack announcement with release notes
+- `get_release_notes_for_current_version()` — loads and parses notes for `__version__` from CHANGELOG.md
+- **Retroactive RELEASE_NOTES** for all versions v1.0.0 through v1.8.0 in CHANGELOG.md
+- **Writing guidelines** in CLAUDE.md for future RELEASE_NOTES authoring
+
+### Tests
+- 9 new tests in `tests/test_deploy_message.py` (parse, missing version, max entries, format with/without notes, fallback)
+- 533 total tests passing
+
+## v1.8.0 — Scheduled Messaging: Weekly Report + Daily Aging Alert (2026-02-15)
+
+<!-- RELEASE_NOTES v1.8.0
+✨ Artık her pazartesi otomatik haftalık veri kalitesi raporu gönderiyorum — eksik alanlar, yaşlanan ticketlar, eski veriler hep bir arada.
+✨ 3 günden fazla açık kalan ticketlar için günlük uyarı atıyorum.
+✨ Geçen haftadan bu yana kaç sorunun çözüldüğünü raporda gösteriyorum.
+-->
+
+### Added
+- **Weekly data quality report** (`generate_weekly_report()`) — automated Slack report with sections:
+  - 🔴 Acil (must fields missing), 🟡 Önemli (important fields missing)
+  - 🟠 Yaşlanan ticketlar (open >3 days), 🔵 Eski veriler (Last Verified >30 days)
+  - ✅ Overall status with completeness percentage
+  - 📈 Resolution tracking: compares current vs last week's snapshot
+- **Daily aging alert** (`generate_daily_aging_alert()`) — posts when tickets are open >3 days, skips silently otherwise
+- **HTTP cron endpoints** — Flask Blueprint at `app/routes/cron.py`:
+  - `POST /cron/weekly-report` — triggers weekly report
+  - `POST /cron/daily-aging` — triggers daily aging alert
+  - Bearer token auth via `CRON_SECRET` env var
+- **Flask migration** — `app/main.py` now wraps Bolt with Flask via `SlackRequestHandler`
+  - `GET /health` and `GET /` for Cloud Run health checks
+  - Slack events routed through `POST /` and `POST /slack/events`
+- **Resolution tracking via snapshots** — weekly report stores issue snapshot in Audit Log (`WEEKLY_REPORT_SNAPSHOT`), next week's report reads it for "X/Y çözüldü" tracking
+  - Snapshot key includes `tab` to disambiguate same field across tabs (e.g., HW Version in Hardware vs Stock)
+  - Awaiting Installation sites excluded from resolution counts (status change ≠ resolution)
+  - 0/0 edge case suppressed (only shows severity parts with >0 prev issues)
+- **Report thread handling** — replies to report threads processed as normal operations; feedback buttons wired with `operation="report"`
+- **Cloud Scheduler setup instructions** in README
+
+### New Files
+- `app/services/scheduled_reports.py` — report generation functions
+- `app/routes/__init__.py` — routes package
+- `app/routes/cron.py` — cron HTTP endpoints
+- `tests/test_scheduled_reports.py` — 28 tests (sections, completeness, resolution, edge cases)
+- `tests/test_cron.py` — 13 tests (auth, weekly, daily endpoints)
+- `tests/test_report_threads.py` — 6 tests (thread replies, feedback wiring)
+
+### Changed
+- `app/main.py` — Flask wrapping Bolt instead of `app.start(port=port)`
+- `app/utils/formatters.py` — `format_feedback_buttons()` supports `context="report"`
+- `app/handlers/actions.py` — feedback_positive recognizes `report_thread` state
+- `app/handlers/messages.py` — negative feedback captures `operation="report"` for report threads
+- `app/services/sheets.py` — added `read_latest_audit_by_operation()` for snapshot retrieval
+- `requirements.txt` — added `flask>=3.0.0`
+
+### Tests
+- 47 new tests (28 scheduled reports + 13 cron + 6 report threads)
+- 492 total tests passing
+
 ## v1.7.5 — Live Testing Bug Fixes Round 3 (2026-02-14)
+
+<!-- RELEASE_NOTES v1.7.5
+🔧 Daha önce toplu donanım girdiğinizde satırlar bazen yanlış sütunlara kayıyordu — artık doğru yere yazıyorum.
+🔧 Artık dropdown alanlar için geçerli seçenekleri gösteriyorum (örn. "Seçenekler: ERG Controls, Müşteri").
+🔧 Implementation alanlarının yanına Türkçe açıklama ekliyorum — "HP alert time" ne demek artık açık.
+-->
 
 ### Fixed
 - **Bug 8: Hardware bulk write column offset** — all `append_row()` calls now pass `table_range` parameter to constrain table detection to actual data columns (A-G for hardware, A-Q for sites, etc.); prevents Google Sheets API from detecting helper columns (H+) as part of the table and misplacing bulk entry rows
@@ -18,6 +195,12 @@
 
 ## v1.7.4 — Live Testing Bug Fixes Round 2 (2026-02-14)
 
+<!-- RELEASE_NOTES v1.7.4
+🔧 Daha önce sorgu yaparken müşteri adını doğru sahaya çeviremiyordum — artık "Este Nove durumu ne?" diye sorduğunuzda doğru sahayı buluyorum.
+🔧 Gıda sahası eklerken clean hygiene time gibi zorunlu alanları sormayı atlıyordum — artık hepsini soruyorum.
+🔧 Onay kartında "Ssid" yazıyordu — artık düzgün "SSID" görünüyor.
+-->
+
 ### Fixed
 - **Bug 5: Query site_id resolution** — query operations (missing_data, stale_data, etc.) now resolve customer names to Site IDs via `SiteResolver` before querying sheets; previously queries bypassed resolution and passed raw names like "este nove" directly to sheet lookups
 - **Bug 6: Food must fields missing in chain** — `facility_type` now propagates through chain state via `chain_ctx`; implementation step for Food sites correctly shows 5 food-specific must fields (clean_hygiene_time, hp_alert_time, etc.); `enforce_must_fields` also reads `facility_type` from existing thread state
@@ -28,6 +211,13 @@
 - 418 total tests passing
 
 ## v1.7.2 — Live Testing Bug Fixes (2026-02-13)
+
+<!-- RELEASE_NOTES v1.7.2
+🔧 Daha önce yeni saha eklerken sonraki adımlarda saha bilgisi kayboluyordu — artık her adımda hatırlıyorum.
+🔧 Daha önce müşteri adı yazıp sorgu yaptığınızda bazen yanlış sahayı buluyordum — artık doğru eşleştiriyorum.
+🔧 Artık Türkçe mesajlarda "site" yerine "saha" diyorum.
+🔧 Olumsuz geri bildirimde artık daha doğal bir soru soruyorum: "Nasıl daha iyi yapabilirdim?"
+-->
 
 ### Fixed
 - **Bug 1: Chain step loses site_id context** — `enforce_must_fields()` now removes fields from Claude's missing list when they're already present in data; `format_chain_input_prompt()` no longer lists site_id as required (it's always known in chain context); chain input now injects `[Site: XXX] [Operation: ...]` prefix so Claude sees the site context; bulk hardware `entries` list satisfies `device_type`/`qty` must fields; implementation fields recognized by both snake_case and sheet column header keys (e.g. `"Internet Provider"` ↔ `internet_provider`)
@@ -40,6 +230,11 @@
 - 408 total tests passing
 
 ## v1.7.1 — Live Sheet Alignment (2026-02-13)
+
+<!-- RELEASE_NOTES v1.7.1
+🔧 Google Sheets'teki renk kuralları gerçek tablo yapısıyla uyumlu hale geldi — eksik alanlar artık doğru renkte görünüyor.
+🔧 Stok tablosunda "Last Verified" sütunu artık doğru yere yazılıyor.
+-->
 
 ### Fixed (Priority 1 — Code Fixes)
 - **Stock tab `Last Verified` column** — added to `STOCK_COLUMNS` constant so appended rows land in the correct column
@@ -63,6 +258,12 @@
 - 1 new `test_sites_excludes_helper_columns` test for `_SiteLabel` filtering
 
 ## v1.7.0 — Validation, Feedback, and Sheet Migrations (2026-02-12)
+
+<!-- RELEASE_NOTES v1.7.0
+✨ Artık her işlemden sonra (sorgu dahil) 👍/👎 ile geri bildirim verebilirsiniz.
+✨ Yeni saha eklerken her adımda zorunlu alanları Türkçe sorularla gösteriyorum.
+🔧 Daha önce Claude'un kaçırdığı zorunlu alanlar fark edilmiyordu — artık ekstra doğrulama yapıyorum.
+-->
 
 ### Added
 - **Must-field validation independent of Claude** — `enforce_must_fields()` validates required fields using `FIELD_REQUIREMENTS` before showing confirmation, catching fields Claude may have missed
@@ -91,6 +292,11 @@
 
 ## v1.6.1 — Schema Patch: Column Alignment and Facility-Type Conditionals (2026-02-12)
 
+<!-- RELEASE_NOTES v1.6.1
+🔧 Gıda sahalarına özel zorunlu alanlar (clean hygiene time vb.) artık doğru tespit ediliyor.
+🔧 Implementation Details sütun sırası düzeltildi — veriler artık doğru hücrelere yazılıyor.
+-->
+
 ### Fixed
 - **Implementation Details column order** — mock and system prompt now match actual Google Sheet column order (Dispenser anchor power type at position 11, after Entry time)
 - **"saha" terminology** — fixed remaining "site" → "saha" in Turkish ambiguous-match message
@@ -103,6 +309,12 @@
 - 6 new facility-type data quality tests, 4 new facility-type classification tests, 2 new friendly field coverage tests
 
 ## v1.6.0 — Schema Changes, Field Classification, and Data Quality Overhaul (2026-02-12)
+
+<!-- RELEASE_NOTES v1.6.0
+✨ Artık eksik alanları Türkçe sorularla soruyorum — alan adı yerine "Bu konuyla kim ilgileniyor?" gibi.
+✨ Veri kalitesi raporunda önem seviyesi eklendi: 🔴 zorunlu alanlar, 🟡 önemli alanlar.
+🔧 "Awaiting Installation" durumundaki sahalar artık gereksiz veri kalitesi uyarısı almıyor.
+-->
 
 ### Added
 - **Field classification config** (`app/field_config/field_requirements.py`) — structured `must` / `important` / `important_conditional` / `optional` classification per tab, driving validation and data quality checks
@@ -134,6 +346,12 @@
 
 ## v1.5.0 — Create-Site Wizard, Data Quality, and UX Polish (2026-02-11)
 
+<!-- RELEASE_NOTES v1.5.0
+✨ Artık yeni saha eklerken donanım ve ayar bilgilerini otomatik soruyorum — atlama seçeneğiyle.
+🔧 Daha önce telefon numarası (+90...) yazınca Google Sheets hata veriyordu — artık düzgün kaydediliyor.
+🔧 Daha önce geri bildirim verdikten sonra thread'de yazamazdınız — artık devam edebilirsiniz.
+-->
+
 ### Added
 - **Proactive chain wizard after create_site** — every new site now prompts for hardware and implementation details (with skip option), even if not mentioned in the original message
 - **Empty chain step prompt** — when a chain step has no pre-filled data, shows "write your data or skip" with ⏭️ Atla button instead of an empty confirmation card
@@ -157,6 +375,12 @@
 
 ## v1.4.0 — Hotfix: Multi-turn Flow, Feedback, and Cancel (2026-02-11)
 
+<!-- RELEASE_NOTES v1.4.0
+🔧 Daha önce eksik bilgi sorduğumda bazen önceki verileri kaybediyordum — artık bağlam korunuyor.
+🔧 Daha önce iptal ettikten sonra thread'de yazamazdınız — artık devam edebilirsiniz.
+✨ Artık her yeni versiyonda ne değiştiğini kanala yazıyorum.
+-->
+
 ### Fixed
 - **Missing fields reply lost create_site context** — when Claude re-classified a short reply (e.g., "İstanbul") as `update_site`, the bot cleared all `create_site` data; now keeps original operation when state has `missing_fields`
 - **Feedback buttons not rendering** — `say(blocks=...)` without `text` fallback caused some Slack clients to not display the 👍/👎 buttons
@@ -168,6 +392,13 @@
 - `SLACK_ANNOUNCE_CHANNEL` env var for deploy announcements
 
 ## v1.3.0 — Polish, Feedback Loop, and Data Quality (2026-02-11)
+
+<!-- RELEASE_NOTES v1.3.0
+✨ Artık sorgudan sonra aynı thread'de devam edebilirsiniz — her seferinde @mustafa yazmanıza gerek yok.
+✨ Artık "eksik veriler var mı?" diye sorabilirsiniz — veri kalitesi raporu çıkarıyorum.
+✨ Her yazma işleminden sonra 👍/👎 ile geri bildirim verebilirsiniz.
+🔧 Daha önce sorgu yaptıktan sonra aynı thread'de yazamazdınız — artık sorunsuz geçiş yapabilirsiniz.
+-->
 
 ### Added
 - **Follow-up queries in threads** — queries now store thread state, enabling natural multi-query conversations without repeating `@mustafa`
@@ -207,6 +438,12 @@
 
 ## v1.2.0 — Cloud Run Deploy + End-to-End Testing (2026-02-10/11)
 
+<!-- RELEASE_NOTES v1.2.0
+✨ Artık yeni saha eklerken donanım → ayarlar → destek kaydı adımlarını zincirleme soruyorum.
+✨ Tek bir mesajda hem saha hem donanım hem ayar bilgisi yazabilirsiniz — hepsini ayrı ayrı çıkarıyorum.
+🔧 Daha önce aynı mesajı bazen iki kez işliyordum — artık Slack tekrarlarını engelliyorum.
+-->
+
 ### Added
 - **Dockerfile** and `.dockerignore` for Cloud Run deployment
 - **Create-site wizard** with chained operations: create_site → update_hardware → update_implementation → log_support
@@ -235,6 +472,12 @@
 - `app/prompts/system_prompt.md`: added multi-tab extraction rules and last_verified extraction instruction
 
 ## v1.1.0 — Sheets + Slack Integration (2026-02-10/11)
+
+<!-- RELEASE_NOTES v1.1.0
+✨ Artık Slack'ten mesaj yazarak Google Sheets'e veri girebilirsiniz — @mustafa ile veya DM ile.
+✨ Her yazma işleminden önce onay kartı gösteriyorum — ✅ ile onaylayın, ❌ ile iptal edin.
+✨ Aynı thread'de eksik bilgileri tamamlayabilirsiniz — her seferinde baştan yazmanıza gerek yok.
+-->
 
 ### Added
 - Google Sheets service: read/write all tabs (Sites, Hardware, Implementation Details, Support Log, Stock, Audit Log)
@@ -265,6 +508,11 @@
 - Trimmed team_context.md: removed duplicate vocabulary sections
 
 ## v1.0.0 — Core Engine (2026-02-10)
+
+<!-- RELEASE_NOTES v1.0.0
+✨ Merhaba, ben Mustafa! Türkçe ve İngilizce mesajlarınızı anlayıp yapılandırılmış veriye dönüştürüyorum.
+✨ Destek kaydı, saha oluşturma, donanım güncellemesi, sorgu — hepsini yapabiliyorum.
+-->
 
 ### Added
 - Pydantic models for all 9 operation types with enum definitions and required field mappings

@@ -7,4 +7,5 @@ venv
 .claude
 tests
 *.md
+!CHANGELOG.md
 !requirements.txt

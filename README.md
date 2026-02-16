@@ -4,7 +4,7 @@ A Slack bot for ERG Controls that manages IoT customer support operations throug
 
 ## Status
 
-**Session 6: Validation, Feedback, and Sheet Migrations** — Complete (316 tests passing)
+**v1.8.4** — 579 tests passing.
 Deployed to Cloud Run (`europe-west1`), live in `#technical-operations`.
 
 ## Quick Start
@@ -39,6 +39,8 @@ ngrok http 8080
 | `SLACK_SIGNING_SECRET` | Slack Signing Secret |
 | `GOOGLE_SHEET_ID` | Google Sheet ID from URL |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | GCP service account JSON (single line) |
+| `SLACK_CHANNEL_ID` | Slack channel ID for scheduled reports (e.g. `C_TECHOPS`) |
+| `CRON_SECRET` | Shared secret for Cloud Scheduler authentication |
 | `SLACK_ANNOUNCE_CHANNEL` | _(Optional)_ Channel ID for deploy announcements |
 
 ## What's Working
@@ -98,11 +100,29 @@ ngrok http 8080
 - **Site Viewer migration** — customer name selector, descending date sort, widened columns
 - **Conditional formatting migration** — color-coded rules for empty must/important fields, stale data, aging tickets
 
+### Hotfixes (v1.8.x)
+- **Stock prompt after hardware writes** — after confirming a hardware inventory write with device quantities, prompts to update stock; user replies with warehouse name to subtract/add, or declines
+- **HW/FW Version normalization** — strips leading `v`/`V` prefix on write (`"v3.6.0"` → `"3.6.0"`)
+- **Feedback button UX** — replaces interactive 👍/👎 buttons with static text after click via `chat_update()`
+- **Human-readable deploy messages** — `RELEASE_NOTES` blocks in CHANGELOG.md parsed and posted to Slack on deploy
+
+### Session 7: Scheduled Messaging
+- **Weekly data quality report** — automated report posted to `#technical-operations` every Monday
+  - Sections: 🔴 must, 🟡 important, 🟠 aging (3+ days), 🔵 stale (30+ days), ✅ overall status with completeness %
+  - Resolution tracking: compares current vs last week's snapshot, shows "X/Y acil sorun çözüldü"
+  - Excludes Awaiting Installation sites from resolution counts (status change ≠ resolution)
+  - Feedback buttons on report; thread replies processed as normal operations
+- **Daily aging alert** — posts when open tickets exceed 3 days, skips silently otherwise
+- **HTTP endpoints** — `POST /cron/weekly-report` and `POST /cron/daily-aging` via Flask Blueprint
+- **Flask migration** — app now runs as Flask wrapping Bolt via `SlackRequestHandler`
+  - `GET /health` and `GET /` for Cloud Run health checks
+  - `process_before_response=False` (Bolt default) ensures Slack 3-second timeout compliance
+
 ## Project Structure
 
 ```
 app/
-├── main.py                 — Entry point, Slack Bolt app init
+├── main.py                 — Entry point, Flask wrapping Bolt + cron routes
 ├── config.py               — Environment configuration
 ├── version.py              — Version and release notes
 ├── models/operations.py    — Pydantic models, enums, required fields
@@ -113,7 +133,10 @@ app/
 │   ├── claude.py           — Claude API integration + prompt building
 │   ├── sheets.py           — Google Sheets read/write operations
 │   ├── site_resolver.py    — Customer name → Site ID resolution
-│   └── data_quality.py     — Missing/stale data detection
+│   ├── data_quality.py     — Missing/stale data detection
+│   └── scheduled_reports.py — Weekly report + daily aging alert generation
+├── routes/
+│   └── cron.py             — HTTP endpoints for Cloud Scheduler
 ├── handlers/
 │   ├── common.py           — Shared message processing pipeline
 │   ├── mentions.py         — @mustafa mention handler
@@ -149,13 +172,21 @@ tests/
 ├── test_chain_step_prompts.py — Chain step field prompts (10 tests)
 ├── test_migrate_dashboard.py  — Dashboard migration (11 tests)
 ├── test_migrate_site_viewer.py — Site Viewer migration (6 tests)
-└── test_migrate_conditional_formatting.py — Conditional formatting (22 tests)
+├── test_migrate_conditional_formatting.py — Conditional formatting (22 tests)
+├── test_scheduled_reports.py — Weekly report + daily aging (28 tests)
+├── test_cron.py             — Cron HTTP endpoints + auth (13 tests)
+├── test_report_threads.py   — Report thread replies + feedback (6 tests)
+├── test_deploy_message.py   — Deploy message formatting + CHANGELOG parsing (10 tests)
+├── test_feedback_button_update.py — Feedback button replacement UX (14 tests)
+├── test_stock_prompt.py     — Stock prompt after hardware writes (18 tests)
+└── test_version_normalize.py — HW/FW version normalization (9 tests)
 
 scripts/
 ├── migrate_technician_to_responsible.py — Column rename migration
 ├── migrate_dashboard.py    — Dashboard device breakdown migration
 ├── migrate_site_viewer.py  — Site Viewer UX migration
-└── migrate_conditional_formatting.py — Conditional formatting migration
+├── migrate_conditional_formatting.py — Conditional formatting migration
+└── normalize_versions.py   — One-time HW/FW version prefix cleanup
 ```
 
 ### Deploy to Cloud Run
@@ -170,6 +201,60 @@ gcloud run deploy mustafa-bot \
 ```
 
 Then update the Slack Event Subscription URL to the Cloud Run service URL + `/slack/events`.
+
+### Set Up Cloud Scheduler (Cron Jobs)
+
+Two scheduled jobs post automated reports to `#technical-operations`:
+
+1. **Generate a shared secret** and set it as an env var on Cloud Run:
+
+```bash
+# Generate a random secret
+CRON_SECRET=$(openssl rand -hex 32)
+
+# Update the Cloud Run service with the secret + channel ID
+gcloud run services update mustafa-bot \
+  --region europe-west1 \
+  --set-env-vars "CRON_SECRET=$CRON_SECRET,SLACK_CHANNEL_ID=C_YOUR_CHANNEL_ID"
+```
+
+2. **Create the weekly report job** (every Monday at 09:00 Istanbul time):
+
+```bash
+gcloud scheduler jobs create http mustafa-weekly-report \
+  --location europe-west1 \
+  --schedule "0 9 * * 1" \
+  --time-zone "Europe/Istanbul" \
+  --uri "https://YOUR_CLOUD_RUN_URL/cron/weekly-report" \
+  --http-method POST \
+  --headers "Authorization=Bearer $CRON_SECRET" \
+  --attempt-deadline 60s
+```
+
+3. **Create the daily aging alert job** (every weekday at 09:00 Istanbul time):
+
+```bash
+gcloud scheduler jobs create http mustafa-daily-aging \
+  --location europe-west1 \
+  --schedule "0 9 * * 1-5" \
+  --time-zone "Europe/Istanbul" \
+  --uri "https://YOUR_CLOUD_RUN_URL/cron/daily-aging" \
+  --http-method POST \
+  --headers "Authorization=Bearer $CRON_SECRET" \
+  --attempt-deadline 60s
+```
+
+4. **Test manually:**
+
+```bash
+# Trigger weekly report immediately
+gcloud scheduler jobs run mustafa-weekly-report --location europe-west1
+
+# Trigger daily aging immediately
+gcloud scheduler jobs run mustafa-daily-aging --location europe-west1
+```
+
+Replace `YOUR_CLOUD_RUN_URL` with the actual Cloud Run service URL and `C_YOUR_CHANNEL_ID` with the Slack channel ID for `#technical-operations`.
 
 ## Architecture
 

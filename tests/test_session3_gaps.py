@@ -49,8 +49,9 @@ class TestStockCrossReference:
     def test_replacement_keyword_in_support_log(self):
         assert _should_ask_stock("log_support", {}, "2 tag değiştirildi") is True
 
-    def test_replacement_keyword_in_hardware_update(self):
-        assert _should_ask_stock("update_hardware", {}, "replaced 3 gateways") is True
+    def test_hardware_update_uses_dedicated_stock_prompt(self):
+        """update_hardware no longer uses _should_ask_stock — has its own stock prompt."""
+        assert _should_ask_stock("update_hardware", {}, "replaced 3 gateways") is False
 
     def test_no_replacement_keyword(self):
         assert _should_ask_stock("log_support", {}, "tag pili bitti") is False

@@ -466,6 +466,14 @@ def process_message(
         if not pending_ops and existing_state.get("pending_operations"):
             pending_ops = existing_state["pending_operations"]
 
+    # Enrich hardware entries with existing row data (for upsert display)
+    if result.operation == "update_hardware":
+        try:
+            sheets = get_sheets()
+            enrich_hardware_entries(result.data, text, sheets)
+        except Exception:
+            logger.exception("Hardware enrichment failed — proceeding with append mode")
+
     # All fields present — show confirmation
     _show_confirmation(result.operation, result.data, user_id, thread_ts, say, text, sender_name, messages, result.language, pending_ops, chain_ctx)
 
@@ -802,3 +810,296 @@ def _normalize_create_site_data(data: dict[str, Any]) -> list[dict] | None:
     if not any(op["operation"] == "update_implementation" for op in extra_ops):
         extra_ops.append({"operation": "update_implementation", "data": {}})
     return extra_ops
+
+
+# --- Hardware qty mode detection ---
+
+_ADDITION_KEYWORDS = (
+    "ekledim", "ekledik", "eklendi", "ekle",
+    "yerleştirdim", "yerleştirdik", "yerleştirildi",
+    "taktım", "taktık", "takıldı",
+    "added", "installed",
+)
+
+_HW_REMOVAL_KEYWORDS = (
+    "çıkardım", "çıkardık", "çıkarıldı", "çıkar",
+    "söktüm", "söktük", "söküldü",
+    "kaldırdım", "kaldırdık", "kaldırıldı",
+    "removed", "took out", "uninstalled",
+)
+
+
+def _detect_qty_mode(raw_message: str) -> str:
+    """Detect qty mode from raw message: 'add', 'subtract', or 'set' (absolute)."""
+    lower = raw_message.lower()
+    if any(kw in lower for kw in _HW_REMOVAL_KEYWORDS):
+        return "subtract"
+    if any(kw in lower for kw in _ADDITION_KEYWORDS):
+        return "add"
+    return "set"
+
+
+def enrich_hardware_entries(data: dict[str, Any], raw_message: str, sheets: SheetsService) -> None:
+    """Annotate hardware entries with existing row info for upsert display.
+
+    Adds to each entry:
+      _existing_qty: int or None (None = new row)
+      _row_index: int or None (1-based sheet row)
+      _existing_row: dict or None (full row data)
+      _qty_mode: "add" | "subtract" | "set"
+    """
+    site_id = data.get("site_id", "")
+    qty_mode = _detect_qty_mode(raw_message)
+
+    entries = data.get("entries", [])
+    if entries:
+        for entry in entries:
+            _enrich_single_hw_entry(entry, site_id, qty_mode, sheets)
+    elif data.get("device_type"):
+        _enrich_single_hw_entry(data, site_id, qty_mode, sheets)
+
+
+def _enrich_single_hw_entry(
+    entry: dict[str, Any], site_id: str, qty_mode: str, sheets: SheetsService,
+) -> None:
+    """Enrich a single hardware entry dict with existing row info."""
+    device_type = entry.get("device_type", "")
+    if not device_type:
+        return
+    hw_version = entry.get("hw_version")
+    result = sheets.find_hardware_row(site_id, device_type, hw_version=hw_version)
+    if result:
+        row_idx, row_data = result
+        entry["_existing_qty"] = int(row_data.get("Qty", 0) or 0)
+        entry["_row_index"] = row_idx
+        entry["_existing_row"] = row_data
+    else:
+        entry["_existing_qty"] = None
+        entry["_row_index"] = None
+        # Detect ambiguity: no hw_version specified, but multiple rows exist
+        if hw_version is None:
+            versions = _find_hw_versions(sheets, site_id, device_type)
+            if len(versions) > 1:
+                entry["_ambiguous_versions"] = True
+                entry["_available_versions"] = versions
+    entry["_qty_mode"] = qty_mode
+
+
+def _find_hw_versions(sheets: SheetsService, site_id: str, device_type: str) -> list[str]:
+    """Return list of HW Version values for a site+device_type combo."""
+    ws = sheets._ws("Hardware Inventory")
+    all_values = ws.get_all_values()
+    if len(all_values) < 2:
+        return []
+    headers = all_values[0]
+    site_col = headers.index("Site ID")
+    type_col = headers.index("Device Type")
+    ver_col = headers.index("HW Version")
+    dt_lower = device_type.lower()
+    versions = []
+    for row in all_values[1:]:
+        if row[site_col] == site_id and row[type_col].lower() == dt_lower:
+            versions.append(row[ver_col])
+    return versions
+
+
+# --- Fuzzy stock location matching ---
+
+_TURKISH_CASE_SUFFIXES = [
+    # Sorted by length descending — match longest suffix first
+    "'ndan", "'nden",
+    "'daki", "'deki",
+    "'dan", "'den", "'tan", "'ten",
+    "ndan", "nden",
+    "daki", "deki",
+    "'ya", "'ye",
+    "dan", "den", "tan", "ten",
+    "'a", "'e",
+]
+
+
+def _normalize_for_match(text: str) -> str:
+    """Normalize text for fuzzy matching: Turkish İ/ı → i, lowercase."""
+    return text.replace("İ", "I").replace("ı", "i").replace("\u0307", "").lower()
+
+
+def _strip_turkish_suffix(word: str) -> str:
+    """Strip a Turkish case suffix from a word."""
+    for suffix in _TURKISH_CASE_SUFFIXES:
+        if word.endswith(suffix) and len(word) > len(suffix):
+            return word[:-len(suffix)]
+    return word
+
+
+def _match_stock_location(user_text: str, locations: list[str]) -> list[str]:
+    """Match user text to stock locations with fuzzy Turkish matching.
+
+    Returns list of matched locations:
+      [] = no match, [x] = single match, [x, y] = ambiguous.
+    """
+    text_lower = user_text.lower().strip()
+
+    # 1. Exact substring match (preserves existing fast-path)
+    for loc in locations:
+        if loc.lower() in text_lower:
+            return [loc]
+
+    # 2. Fuzzy keyword match with Turkish normalization + suffix stripping
+    normalized = _normalize_for_match(user_text)
+    words = normalized.split()
+    stripped_words = {_strip_turkish_suffix(w) for w in words} | set(words)
+
+    matches = []
+    for loc in locations:
+        loc_keywords = {_normalize_for_match(w) for w in loc.split()}
+        if loc_keywords & stripped_words:
+            matches.append(loc)
+
+    return matches
+
+
+# --- Stock reply handler ---
+
+_STOCK_DECLINE_KEYWORDS = (
+    "hayır", "hayir", "gerek yok", "yok", "no", "skip", "atla", "pas",
+)
+
+
+def handle_stock_reply(
+    text: str,
+    thread_ts: str,
+    state: dict[str, Any],
+    say,
+    user_id: str,
+) -> bool:
+    """Handle a user reply to a stock prompt.
+
+    Returns True if the reply was handled (caller should stop processing),
+    False if the reply is not related to the stock prompt.
+    """
+    text_lower = text.lower().strip()
+
+    # Check for decline
+    if any(kw in text_lower for kw in _STOCK_DECLINE_KEYWORDS):
+        say(text="Tamam, stok güncellenmedi.", thread_ts=thread_ts)
+        _clear_stock_state(thread_ts)
+        return True
+
+    # Get stock data to find locations
+    sheets = get_sheets()
+    stock = sheets.read_stock()
+    locations = sorted({s["Location"] for s in stock if s.get("Location")})
+
+    # Fuzzy match location from user text
+    matched = _match_stock_location(text, locations)
+
+    if len(matched) > 1:
+        # Ambiguous — ask for clarification
+        loc_list = ", ".join(f"`{loc}`" for loc in matched)
+        say(
+            text=f"Birden fazla depo eşleşti: {loc_list}\nHangisini kastediyorsunuz?",
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if not matched:
+        loc_list = ", ".join(f"`{loc}`" for loc in locations)
+        say(
+            text=f"Bu depoyu tanıyamadım. Mevcut depolar: {loc_list}",
+            thread_ts=thread_ts,
+        )
+        return True
+
+    matched_location = matched[0]
+
+    # Process each stock entry
+    entries = state.get("stock_entries", [])
+    results: list[str] = []
+    for entry in entries:
+        device_type = entry["device_type"]
+        qty = entry["qty"]
+        direction = entry.get("direction", "subtract")
+
+        # Find stock row
+        row_idx = sheets.find_stock_row_index(matched_location, device_type)
+
+        if row_idx is None:
+            if direction == "add":
+                # Add new stock entry
+                from datetime import date
+                sheets.append_stock({
+                    "location": matched_location,
+                    "device_type": device_type,
+                    "qty": qty,
+                    "last_verified": date.today().isoformat(),
+                })
+                results.append(f"📦 {matched_location}'e {qty} {device_type} eklendi (yeni kayıt)")
+            else:
+                results.append(f"⚠️ {matched_location}'te {device_type} bulunamadı — stok güncellenmedi")
+            continue
+
+        # Get current qty
+        stock_row = next(
+            (s for s in stock if s["Location"] == matched_location and s["Device Type"] == device_type),
+            None,
+        )
+        current_qty = int(stock_row.get("Qty", 0)) if stock_row else 0
+
+        if direction == "subtract":
+            new_qty = current_qty - qty
+            if new_qty < 0:
+                say(
+                    text=(
+                        f"⚠️ {matched_location}'te sadece {current_qty} {device_type} var "
+                        f"ama {qty} düşmek istiyorsun — yine de güncelleyeyim mi?"
+                    ),
+                    thread_ts=thread_ts,
+                )
+                # Store confirmation state for next reply
+                state["stock_negative_confirm"] = True
+                thread_store.set(thread_ts, state)
+                return True
+        else:  # add
+            new_qty = current_qty + qty
+
+        sheets.update_stock(row_idx, {"Qty": new_qty})
+        results.append(f"📦 {matched_location}: {device_type} {current_qty} → {new_qty}")
+
+    # Send results
+    say(text="Stok güncellendi:\n" + "\n".join(results), thread_ts=thread_ts)
+
+    # Audit log
+    try:
+        site_id = entries[0].get("site_id", "") if entries else ""
+        summary_parts = [f"{e['qty']} {e['device_type']}" for e in entries]
+        sheets.append_audit_log(
+            user=user_id,
+            operation="UPDATE",
+            target_tab="Stock",
+            site_id=site_id,
+            summary=f"Stock update via prompt: {', '.join(summary_parts)} @ {matched_location}",
+            raw_message=text,
+        )
+    except Exception:
+        logger.exception("Could not log stock update to audit")
+
+    _clear_stock_state(thread_ts)
+    return True
+
+
+def _clear_stock_state(thread_ts: str) -> None:
+    """Remove stock prompt state from thread, preserving other state."""
+    state = thread_store.get(thread_ts)
+    if not state:
+        return
+
+    state.pop("stock_prompt_pending", None)
+    state.pop("stock_entries", None)
+    state.pop("stock_negative_confirm", None)
+
+    # If no other state remains, clear the thread entirely
+    has_other = state.get("feedback_pending") or state.get("feedback_awaiting_response")
+    if has_other:
+        thread_store.set(thread_ts, state)
+    else:
+        thread_store.clear(thread_ts)

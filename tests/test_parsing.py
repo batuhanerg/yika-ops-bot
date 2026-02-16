@@ -169,3 +169,63 @@ class TestOldDate:
         assert result.operation == "log_support"
         # The service should flag old dates
         assert result.warnings is not None and len(result.warnings) > 0
+
+
+# ===========================================================================
+# Bug 14: Ticket close/update vs new log_support classification
+# ===========================================================================
+
+
+class TestTicketCloseClassification:
+    """Bug 14: Messages referencing existing tickets must be update_support, not log_support."""
+
+    def test_explicit_ticket_id_close(self, claude_service: ClaudeService):
+        """'SUP-007 ticketini kapat, sorun çözüldü' → update_support."""
+        result = claude_service.parse_message(
+            message="SUP-007 ticketini kapat, sorun çözüldü",
+            sender_name="Batu",
+        )
+        assert result.operation == "update_support", (
+            f"Expected update_support but got {result.operation}"
+        )
+        assert result.data.get("ticket_id") == "SUP-007"
+        assert result.data.get("status") == "Resolved"
+
+    def test_informal_ticket_reference_close(self, claude_service: ClaudeService):
+        """'sup 007 kapatabilirsin; sorunu cozduk' → update_support (informal ticket ref)."""
+        result = claude_service.parse_message(
+            message="sup 007 kapatabilirsin; sorunu cozduk",
+            sender_name="Batu",
+        )
+        assert result.operation == "update_support", (
+            f"Expected update_support but got {result.operation}"
+        )
+        assert result.data.get("ticket_id") == "SUP-007"
+        assert result.data.get("status") == "Resolved"
+
+    def test_site_ticket_close_no_id(self, claude_service: ClaudeService):
+        """'ASM'deki açık ticket'ı kapat' → update_support (no ticket ID but close intent).
+
+        ticket_id must be in missing_fields so the bot asks which ticket to close.
+        """
+        result = claude_service.parse_message(
+            message="ASM'deki açık ticket'ı kapat",
+            sender_name="Batu",
+        )
+        assert result.operation == "update_support", (
+            f"Expected update_support but got {result.operation}"
+        )
+        assert result.data.get("status") == "Resolved"
+        assert "ticket_id" in result.missing_fields, (
+            f"ticket_id should be in missing_fields but got {result.missing_fields}"
+        )
+
+    def test_new_visit_stays_log_support(self, claude_service: ClaudeService):
+        """'bugün ASM'ye gittim, 2 tag değiştirdim' → log_support (new visit, no ticket ref)."""
+        result = claude_service.parse_message(
+            message="bugün ASM'ye gittim, 2 tag değiştirdim",
+            sender_name="Batu",
+        )
+        assert result.operation == "log_support", (
+            f"Expected log_support but got {result.operation}"
+        )

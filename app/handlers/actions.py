@@ -27,6 +27,140 @@ _REPLACEMENT_KEYWORDS = (
     "yenisiyle", "swap", "takas",
 )
 
+# Device removal keywords — indicates devices LEFT the site (→ add to stock)
+_REMOVAL_KEYWORDS = (
+    "çıkardım", "çıkardık", "çıkarıldı", "çıkar",
+    "söktüm", "söktük", "söküldü",
+    "kaldırdım", "kaldırdık", "kaldırıldı",
+    "removed", "took out", "uninstalled",
+)
+
+
+def _is_removal(raw_message: str) -> bool:
+    """Check if the raw message indicates device removal (vs addition)."""
+    return any(kw in raw_message.lower() for kw in _REMOVAL_KEYWORDS)
+
+
+def _build_stock_entries(data: dict[str, Any], raw_message: str) -> list[dict[str, Any]]:
+    """Extract stock-relevant entries from hardware write data.
+
+    Returns list of {device_type, qty, site_id, direction} dicts.
+    direction: "subtract" (devices came FROM stock) or "add" (devices returned TO stock).
+    """
+    entries = data.get("entries", [])
+    if not entries:
+        # Single entry (non-bulk)
+        if data.get("qty"):
+            entries = [data]
+        else:
+            return []
+
+    direction = "add" if _is_removal(raw_message) else "subtract"
+    site_id = data.get("site_id", "")
+
+    stock_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        qty = entry.get("qty")
+        if qty and int(qty) > 0:
+            stock_entries.append({
+                "device_type": entry.get("device_type", ""),
+                "qty": int(qty),
+                "site_id": site_id,
+                "direction": direction,
+            })
+    return stock_entries
+
+
+def _format_stock_prompt(entries: list[dict[str, Any]]) -> str:
+    """Format the stock follow-up prompt message."""
+    is_removal = entries[0].get("direction") == "add"
+    site_id = entries[0].get("site_id", "")
+
+    if is_removal:
+        header = "Bu cihazlar stoğa mı geri döndü?"
+        lines = [f"📦 {e['qty']} {e['device_type']} ← {site_id}'den çıkarıldı" for e in entries]
+        footer = 'Stoğa eklemek istersen, hangi depoya gittiğini yaz (örn: "Istanbul Office\'e gitti")'
+    else:
+        header = "Bu cihazlar stoktan mı geldi? Stok güncellemek ister misin?"
+        lines = [f"📦 {e['qty']} {e['device_type']} → {site_id}'e eklendi" for e in entries]
+        footer = 'Stoktan düşmek istersen, hangi depodan geldiğini yaz (örn: "Istanbul Office\'ten geldi")'
+
+    return f"{header}\n" + "\n".join(lines) + f"\n{footer}"
+
+
+def _upsert_hardware_entry(sheets: SheetsService, entry: dict[str, Any]) -> None:
+    """Write a single hardware entry: update in place if row exists, else append."""
+    row_index = entry.get("_row_index")
+    existing_qty = entry.get("_existing_qty")
+    qty_mode = entry.get("_qty_mode", "set")
+    existing_row = entry.get("_existing_row")
+
+    if row_index is not None and existing_qty is not None:
+        # Update existing row
+        qty = int(entry.get("qty", 0))
+        if qty_mode == "add":
+            new_qty = existing_qty + qty
+        elif qty_mode == "subtract":
+            new_qty = existing_qty - qty
+        else:  # set
+            new_qty = qty
+
+        updates: dict[str, Any] = {"Qty": new_qty}
+
+        if entry.get("last_verified"):
+            updates["Last Verified"] = entry["last_verified"]
+
+        # Only overwrite versions/notes if user explicitly provided them
+        from app.services.sheets import _HARDWARE_KEY_MAP, _normalize_version_fields
+        normalized = _normalize_version_fields(entry)
+        for snake_key, col_name in _HARDWARE_KEY_MAP.items():
+            if snake_key in ("site_id", "device_type", "qty", "last_verified"):
+                continue
+            val = normalized.get(snake_key)
+            if val:
+                updates[col_name] = val
+
+        sheets.update_hardware_row(row_index, updates)
+    else:
+        # New row — strip internal annotations before appending
+        clean = {k: v for k, v in entry.items() if not k.startswith("_")}
+        sheets.append_hardware(clean)
+
+
+def _replace_buttons_with_static(client, body: dict, label: str) -> None:
+    """Replace the actions block in the original message with a static context block.
+
+    label: e.g. "👍 Evet olarak değerlendirildi" or "👎 Hayır olarak değerlendirildi"
+    """
+    try:
+        msg = body.get("message", {})
+        message_ts = msg.get("ts", "")
+        channel = body.get("channel", {}).get("id", "")
+        original_blocks = msg.get("blocks", [])
+
+        if not message_ts or not channel or not original_blocks:
+            return
+
+        updated_blocks = []
+        for block in original_blocks:
+            if block.get("type") == "actions":
+                # Replace with static context block
+                updated_blocks.append({
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": label}],
+                })
+            else:
+                updated_blocks.append(block)
+
+        client.chat_update(
+            channel=channel,
+            ts=message_ts,
+            blocks=updated_blocks,
+            text=label,
+        )
+    except Exception:
+        logger.exception("Failed to update feedback buttons via chat_update")
+
 
 def register(app: App) -> None:
     """Register button action handlers."""
@@ -158,7 +292,7 @@ def register(app: App) -> None:
                 else:
                     say(text=f"✅ İşlem tamamlandı.\n{readback_with_link}", thread_ts=thread_ts, channel=channel)
 
-                    # Stock cross-reference check (only for non-chained single operations)
+                    # Stock cross-reference check (only for log_support with replacement keywords)
                     if _should_ask_stock(operation, data, raw_message):
                         say(
                             text="Bu değişim stok ile ilgili mi? Stok güncellemesi yapmamı ister misin?",
@@ -168,7 +302,7 @@ def register(app: App) -> None:
 
                 # Send feedback buttons and store feedback context
                 say(text="Doğru kaydedildi mi?", blocks=format_feedback_buttons(), thread_ts=thread_ts, channel=channel)
-                thread_store.set(thread_ts, {
+                feedback_state: dict[str, Any] = {
                     "feedback_pending": True,
                     "operation": operation,
                     "user_id": user_id,
@@ -177,7 +311,17 @@ def register(app: App) -> None:
                     "raw_message": raw_message,
                     "sender_name": sender_name,
                     "language": state.get("language", "tr"),
-                })
+                }
+
+                # Stock prompt for hardware writes with qty (non-chained only)
+                if operation == "update_hardware" and not in_chain:
+                    stock_entries = _build_stock_entries(data, raw_message)
+                    if stock_entries:
+                        say(text=_format_stock_prompt(stock_entries), thread_ts=thread_ts, channel=channel)
+                        feedback_state["stock_prompt_pending"] = True
+                        feedback_state["stock_entries"] = stock_entries
+
+                thread_store.set(thread_ts, feedback_state)
 
         except Exception as e:
             logger.exception("Write error")
@@ -319,11 +463,17 @@ def register(app: App) -> None:
         if not state or not state.get("feedback_pending"):
             return
 
+        is_report = state.get("report_thread", False)
+        operation = "report" if is_report else state.get("operation", "")
+
+        # Replace buttons with static text immediately
+        _replace_buttons_with_static(client, body, "👍 Evet olarak değerlendirildi")
+
         try:
             sheets = get_sheets()
             sheets.append_feedback(
                 user=state.get("sender_name", "Unknown"),
-                operation=state.get("operation", ""),
+                operation=operation,
                 site_id=state.get("data", {}).get("site_id", ""),
                 ticket_id=state.get("ticket_id", ""),
                 rating="positive",
@@ -333,12 +483,28 @@ def register(app: App) -> None:
         except Exception:
             logger.exception("Feedback write error")
 
-        say(
-            text="Teşekkürler, geri bildiriminiz kaydedildi! İşlem tamamlandı — yeni konu için yeni bir thread başlatın.",
-            thread_ts=thread_ts,
-            channel=channel,
-        )
-        thread_store.clear(thread_ts)
+        if is_report:
+            say(
+                text="Teşekkürler, geri bildiriminiz kaydedildi!",
+                thread_ts=thread_ts,
+                channel=channel,
+            )
+        else:
+            say(
+                text="Teşekkürler, geri bildiriminiz kaydedildi! İşlem tamamlandı — yeni konu için yeni bir thread başlatın.",
+                thread_ts=thread_ts,
+                channel=channel,
+            )
+        # Preserve stock prompt state if pending
+        if state.get("stock_prompt_pending"):
+            thread_store.set(thread_ts, {
+                "stock_prompt_pending": True,
+                "stock_entries": state.get("stock_entries", []),
+                "user_id": state.get("user_id"),
+                "language": state.get("language", "tr"),
+            })
+        else:
+            thread_store.clear(thread_ts)
 
     @app.action("feedback_negative")
     def handle_feedback_negative(ack, body, say, client) -> None:
@@ -351,6 +517,9 @@ def register(app: App) -> None:
         state = thread_store.get(thread_ts)
         if not state or not state.get("feedback_pending"):
             return
+
+        # Replace buttons with static text immediately
+        _replace_buttons_with_static(client, body, "👎 Hayır olarak değerlendirildi")
 
         # Ask for details — store state awaiting response
         thread_store.set(thread_ts, {
@@ -400,10 +569,10 @@ def _execute_write(sheets: SheetsService, operation: str, data: dict[str, Any]) 
         if entries:
             for entry in entries:
                 entry["site_id"] = data.get("site_id", "")
-                sheets.append_hardware(entry)
+                _upsert_hardware_entry(sheets, entry)
         else:
             data_copy = {**data}
-            sheets.append_hardware(data_copy)
+            _upsert_hardware_entry(sheets, data_copy)
 
     elif operation == "update_implementation":
         site_id = data.get("site_id", "")
@@ -493,8 +662,8 @@ def _build_readback_with_link(readback: str) -> str:
 
 
 def _should_ask_stock(operation: str, data: dict[str, Any], raw_message: str) -> bool:
-    """Check if we should ask about stock cross-reference."""
-    if operation not in ("log_support", "update_hardware"):
+    """Check if we should ask about stock cross-reference (log_support only)."""
+    if operation != "log_support":
         return False
     raw_lower = raw_message.lower()
     return any(kw in raw_lower for kw in _REPLACEMENT_KEYWORDS)

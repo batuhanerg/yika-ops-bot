@@ -290,6 +290,23 @@ GOOGLE_SERVICE_ACCOUNT_JSON=...
 
 ---
 
+## SESSION 7: Scheduled Messaging — Weekly Report + Daily Aging Alert ✅
+
+**Status:** Complete — 492 tests passing.
+
+**What was built:**
+- `app/services/scheduled_reports.py` — `generate_weekly_report()` and `generate_daily_aging_alert()` functions
+- `app/routes/cron.py` — Flask Blueprint with `POST /cron/weekly-report` and `POST /cron/daily-aging` endpoints, Bearer token auth via `CRON_SECRET`
+- Flask migration in `app/main.py` — wraps Bolt with Flask via `SlackRequestHandler`, health check endpoints
+- Resolution tracking via JSON snapshots in Audit Log (`WEEKLY_REPORT_SNAPSHOT`), keyed by `(site_id, tab, field, severity)` to disambiguate fields across tabs
+- Awaiting Installation sites excluded from resolution counts
+- Report thread replies processed as normal operations; feedback wired with `operation="report"`
+- Cloud Scheduler setup instructions in README
+
+**47 new tests** in `test_scheduled_reports.py` (28), `test_cron.py` (13), `test_report_threads.py` (6)
+
+---
+
 ## Important Rules (all sessions)
 
 1. **Never write to Google Sheets without user confirmation.** Parse → show confirmation → wait for ✅ → write.
@@ -306,6 +323,27 @@ After EVERY session:
 - Update `README.md` with any new setup steps or usage instructions
 - Update `CHANGELOG.md` with what was added/changed
 - Keep `CLAUDE.md` accurate if anything deviates from plan
+
+## Writing RELEASE_NOTES for Deployments
+
+Each version in `CHANGELOG.md` should have a `<!-- RELEASE_NOTES vX.Y.Z -->` HTML comment block. This is parsed by `app/version.py` and posted to Slack on deploy. Guidelines:
+
+- Write in conversational Turkish, as if Mustafa is talking to the team
+- Every entry follows the pattern: "Daha önce [problem] — artık [fix]" or "Artık [new capability]"
+- Use 🔧 for fixes, ✨ for new features, 🗑️ for removed annoyances
+- No developer jargon — no "resolve", "parse", "chain context", "column offset"
+- Refer to things by what the user sees/does, not internal code concepts
+- Keep each entry to 1-2 sentences max
+- Skip trivial changes (internal refactors, test fixes) — only include things the team will notice
+- Maximum 5 entries per version — if more, pick the most impactful
+
+Example:
+```
+<!-- RELEASE_NOTES v1.7.4
+🔧 Daha önce sorgu yaparken müşteri adını doğru sahaya çeviremiyordum — artık doğru sahayı buluyorum.
+🔧 Gıda sahası eklerken clean hygiene time gibi zorunlu alanları sormayı atlıyordum — artık hepsini soruyorum.
+-->
+```
 
 ## Future Enhancements (NOT in v1)
 
