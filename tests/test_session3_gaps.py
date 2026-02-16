@@ -366,6 +366,44 @@ class TestBuildSitesContext:
         assert "existing" in result.lower() or "site" in result.lower()
 
 
+class TestUpdateSiteDoesNotRequireCreateFields:
+    """Bug 15: update_site should NOT enforce create_site must fields."""
+
+    def test_update_site_no_create_must_fields(self):
+        """update_site with only site_id + contacts should have no must-field blockers."""
+        from app.utils.missing_fields import enforce_must_fields
+
+        data = {
+            "site_id": "YTP-TR-01",
+            "supervisor_1": "Cigdem Yuksel Koc",
+            "phone_1": "0 535 411 78 24",
+        }
+        missing = enforce_must_fields("update_site", data, [])
+        # Should NOT require customer, city, country, facility_type, contract_status
+        create_fields = {"customer", "city", "country", "facility_type", "contract_status"}
+        assert not create_fields.intersection(missing), (
+            f"update_site should not require create_site fields, but got: {missing}"
+        )
+
+    def test_update_site_empty_missing_list(self):
+        """update_site with partial data should return empty missing list."""
+        from app.utils.missing_fields import enforce_must_fields
+
+        data = {"site_id": "YTP-TR-01", "supervisor_1": "Test"}
+        missing = enforce_must_fields("update_site", data, [])
+        assert missing == []
+
+    def test_create_site_still_requires_must_fields(self):
+        """create_site should still enforce all must fields."""
+        from app.utils.missing_fields import enforce_must_fields
+
+        data = {"site_id": "NEW-TR-01"}
+        missing = enforce_must_fields("create_site", data, [])
+        assert "customer" in missing
+        assert "city" in missing
+        assert "country" in missing
+
+
 class TestSitesContextInjection:
     """Tests that process_message reads sites and passes them to Claude."""
 

@@ -43,7 +43,8 @@ _OP_TO_TAB = {
     "update_hardware": "hardware_inventory",
     "update_implementation": "implementation_details",
     "update_stock": "stock",
-    "update_site": "sites",
+    # update_site intentionally NOT mapped — only site_id is required,
+    # not the full create_site must fields (customer, city, country, etc.)
     "update_support": "support_log",
 }
 

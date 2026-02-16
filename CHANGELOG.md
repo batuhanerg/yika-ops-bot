@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.8.8 — Update Site Must-Field Fix (2026-02-16)
+
+<!-- RELEASE_NOTES v1.8.8
+🔧 Daha önce mevcut sahaya iletişim bilgisi eklerken müşteri adı, şehir, ülke gibi bilgiler istiyordum — artık sadece eklemek istediğiniz bilgileri yazmanız yeterli.
+-->
+
+### Fixed
+- **update_site must-field enforcement** — `enforce_must_fields` was mapping `update_site` to the Sites tab, requiring all `create_site` must fields (customer, city, country, facility_type, contract_status). Now `update_site` only requires `site_id`; partial updates work correctly.
+
+### Tests
+- 3 new tests: update_site doesn't require create_site fields, empty missing list, create_site still enforces
+- 640 total tests passing
+
 ## v1.8.7 — Dynamic Sites Context + Dedup Fix (2026-02-16)
 
 <!-- RELEASE_NOTES v1.8.7
