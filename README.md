@@ -4,7 +4,7 @@ A Slack bot for ERG Controls that manages IoT customer support operations throug
 
 ## Status
 
-**v1.8.4** — 579 tests passing.
+**v1.8.7** — 637 tests passing.
 Deployed to Cloud Run (`europe-west1`), live in `#technical-operations`.
 
 ## Quick Start
@@ -101,6 +101,8 @@ ngrok http 8080
 - **Conditional formatting migration** — color-coded rules for empty must/important fields, stale data, aging tickets
 
 ### Hotfixes (v1.8.x)
+- **Dynamic sites context** — Claude receives full sites list before classification, correctly identifies existing customers instead of misclassifying as `create_site`
+- **Dedup TTL 300s** — covers Slack's full retry window (~10s, ~60s, ~5min), preventing duplicate/triple responses during cold starts
 - **Stock prompt after hardware writes** — after confirming a hardware inventory write with device quantities, prompts to update stock; user replies with warehouse name to subtract/add, or declines
 - **HW/FW Version normalization** — strips leading `v`/`V` prefix on write (`"v3.6.0"` → `"3.6.0"`)
 - **Feedback button UX** — replaces interactive 👍/👎 buttons with static text after click via `chat_update()`
@@ -167,7 +169,7 @@ tests/
 ├── test_audit_guardrails.py — Failed/cancelled audit logging (12 tests)
 ├── test_feedback.py        — Feedback loop (thumbs up/down)
 ├── test_rename_responsible.py — Technician→Responsible rename
-├── test_session3_gaps.py   — Dedup, stock xref, permissions (14 tests)
+├── test_session3_gaps.py   — Dedup, stock xref, permissions, sites context (26 tests)
 ├── test_help_and_readback.py  — Help text + Sheet link readback
 ├── test_chain_step_prompts.py — Chain step field prompts (10 tests)
 ├── test_migrate_dashboard.py  — Dashboard migration (11 tests)

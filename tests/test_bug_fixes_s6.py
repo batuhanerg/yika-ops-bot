@@ -116,7 +116,7 @@ class TestBug1ChainSiteIdInjection:
 
         captured_messages = []
 
-        def capture_parse(message, sender_name, thread_context=None):
+        def capture_parse(message, sender_name, thread_context=None, sites_context=""):
             captured_messages.append(message)
             return mock_result
 
@@ -180,7 +180,7 @@ class TestBug1ChainSiteIdInjection:
         mock_result.language = "tr"
         mock_result.extra_operations = None
 
-        def capture_parse(message, sender_name, thread_context=None):
+        def capture_parse(message, sender_name, thread_context=None, sites_context=""):
             captured_messages.append(message)
             return mock_result
 

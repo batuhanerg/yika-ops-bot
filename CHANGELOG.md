@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.8.7 — Dynamic Sites Context + Dedup Fix (2026-02-16)
+
+<!-- RELEASE_NOTES v1.8.7
+🔧 Daha önce "yeditepe koşuyolu için iletişim bilgisi ekle" dediğinizde sahayı tanıyamıyordum ve yeni saha oluşturmak istiyordum — artık tüm sahaları biliyorum ve doğru sahayı güncelliyorum.
+🔧 Daha önce aynı mesaja 2-3 kez cevap veriyordum — artık tekrar eden mesajları doğru yakalıyorum.
+-->
+
+### Fixed
+- **Dynamic sites context** — Claude now receives the full sites list before classification, so it correctly identifies existing customers (e.g., "yeditepe koşuyolu") and classifies as `update_site` instead of `create_site`
+- **Dedup TTL** — increased from 30s to 300s to cover Slack's full retry window (~10s, ~60s, ~5min), preventing duplicate/triple bot responses during cold starts
+- **create_site vs update_site prompt rules** — explicit decision rules added to system prompt for when to use each operation
+
+### Changed
+- Hardcoded site aliases removed from `team_context.md` — sites are now loaded dynamically from the sheet
+- Site resolution in `process_message` reuses the early-read sites list instead of making duplicate sheet reads
+- Duplicate site_id check for `create_site` also reuses the early-read sites list
+
+### Tests
+- 5 new tests: `build_sites_context` (4), sites context injection in `process_message` (1)
+- 3 new dedup tests: TTL >= 300s, 60s retry caught, 290s retry caught
+- 637 total tests passing
+
 ## v1.8.6 — Version-Aware Hardware Upsert (2026-02-16)
 
 <!-- RELEASE_NOTES v1.8.6

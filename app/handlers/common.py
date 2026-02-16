@@ -10,7 +10,7 @@ from typing import Any
 
 from app.handlers.threads import ThreadStore
 from app.models.operations import TEAM_MEMBERS
-from app.services.claude import ClaudeService
+from app.services.claude import ClaudeService, build_sites_context
 from app.services.sheets import SheetsService
 from app.services.site_resolver import SiteResolver
 from app.services.data_quality import find_missing_data, find_stale_data
@@ -34,7 +34,7 @@ thread_store = ThreadStore()
 # Event deduplication to prevent double-processing from Slack retries
 _processed_events: dict[str, float] = {}
 _processed_lock = Lock()
-_DEDUP_TTL = 30  # seconds
+_DEDUP_TTL = 300  # seconds — must cover Slack retry window (~10s, ~60s, ~5min)
 
 
 def _is_duplicate_event(event_ts: str) -> bool:
@@ -146,6 +146,15 @@ def process_message(
     if existing_state and existing_state.get("messages"):
         thread_context = existing_state["messages"]
 
+    # Read sites early — used for both Claude context and site resolution later
+    try:
+        sheets = get_sheets()
+        all_sites = sheets.read_sites()
+    except Exception:
+        logger.exception("Could not read sites for context")
+        all_sites = []
+    sites_ctx = build_sites_context(all_sites)
+
     # Inject chain context into message so Claude knows the site and expected operation
     parse_text = text
     is_chain_input = bool(existing_state and existing_state.get("awaiting_chain_input"))
@@ -163,6 +172,7 @@ def process_message(
             message=parse_text,
             sender_name=sender_name,
             thread_context=thread_context,
+            sites_context=sites_ctx,
         )
     except Exception as e:
         logger.exception("Claude API error")
@@ -223,11 +233,9 @@ def process_message(
         # Resolve site_id for queries (same logic as write operations)
         q_site_id = result.data.get("site_id", "")
         if q_site_id and not _is_valid_site_id_format(q_site_id):
-            resolver = _get_site_resolver()
+            resolver = SiteResolver(all_sites)
             matches = resolver.resolve(q_site_id)
             if len(matches) == 0:
-                sheets = get_sheets()
-                all_sites = sheets.read_sites()
                 available = [s["Site ID"] for s in all_sites]
                 say(
                     blocks=format_error_message("unknown_site", site_name=q_site_id, available_sites=available),
@@ -316,11 +324,9 @@ def process_message(
     # Resolve site if needed
     site_id = result.data.get("site_id", "")
     if site_id and not _is_valid_site_id_format(site_id) and result.operation != "create_site":
-        resolver = _get_site_resolver()
+        resolver = SiteResolver(all_sites)
         matches = resolver.resolve(site_id)
         if len(matches) == 0:
-            sheets = get_sheets()
-            all_sites = sheets.read_sites()
             available = [s["Site ID"] for s in all_sites]
             say(
                 blocks=format_error_message("unknown_site", site_name=site_id, available_sites=available),
@@ -435,22 +441,16 @@ def process_message(
 
         # Duplicate site_id check
         site_id = result.data.get("site_id", "")
-        if site_id:
-            try:
-                sheets = get_sheets()
-                existing = sheets.read_sites()
-                if any(s["Site ID"] == site_id for s in existing):
-                    say(
-                        text=(
-                            f"⚠️ `{site_id}` zaten mevcut. Yeni saha oluşturmak yerine "
-                            f"güncellemek mi istiyorsunuz?\n"
-                            f"Yeni saha olarak devam etmek istiyorsanız lütfen farklı bir Site ID belirtin."
-                        ),
-                        thread_ts=thread_ts,
-                    )
-                    return
-            except Exception:
-                pass  # Don't block on sheet read errors
+        if site_id and any(s["Site ID"] == site_id for s in all_sites):
+            say(
+                text=(
+                    f"⚠️ `{site_id}` zaten mevcut. Yeni saha oluşturmak yerine "
+                    f"güncellemek mi istiyorsunuz?\n"
+                    f"Yeni saha olarak devam etmek istiyorsanız lütfen farklı bir Site ID belirtin."
+                ),
+                thread_ts=thread_ts,
+            )
+            return
 
     # Preserve chain context from existing thread state
     chain_ctx = None

@@ -11,16 +11,6 @@
 
 "Koray bey" = Koray. "ben gittim" / first person = the Slack sender.
 
-## Site Aliases
-
-| Site ID | Customer | Aliases |
-|---|---|---|
-| MIG-TR-01 | Migros | Migros, MIG |
-| MCD-EG-01 | McDonald's | McDonald's, MCD, McDonalds, Mek |
-| ASM-TR-01 | Anadolu Sağlık Merkezi | ASM, Anadolu Sağlık, Anadolu |
-
-Bot also reads Sites tab dynamically for the full mapping.
-
 ## Site ID Convention
 
 Format: `XXX-CC-NN`

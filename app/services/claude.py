@@ -21,6 +21,32 @@ def _load_prompt(filename: str) -> str:
     return (PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
 
+def build_sites_context(sites: list[dict]) -> str:
+    """Build a compact sites reference string for Claude's system prompt.
+
+    Returns a newline-separated list of "Site ID | Customer Name" entries,
+    preceded by an instruction header.  Returns "" if sites is empty.
+    """
+    lines = []
+    for s in sites:
+        sid = s.get("Site ID", "").strip()
+        if not sid:
+            continue
+        customer = s.get("Customer", "").strip()
+        lines.append(f"{sid} | {customer}")
+    if not lines:
+        return ""
+    header = (
+        "## Existing Sites\n\n"
+        "The following sites already exist. When the user references a customer "
+        "or site by name, match it against this list. If it matches an existing "
+        "site, use `update_site` — never `create_site` for an existing customer.\n\n"
+        "Site ID | Customer\n"
+        "---|---"
+    )
+    return header + "\n" + "\n".join(lines)
+
+
 class ClaudeService:
     """Parses user messages via Claude Haiku into structured ParseResult."""
 
@@ -36,14 +62,19 @@ class ClaudeService:
             _load_prompt("team_context.md"),
         ])
 
-    def _build_system_prompt(self) -> str:
-        return f"{self._static_prompt}\n---\nToday's date: {date.today().isoformat()}"
+    def _build_system_prompt(self, sites_context: str = "") -> str:
+        parts = [self._static_prompt]
+        if sites_context:
+            parts.append(f"\n---\n{sites_context}")
+        parts.append(f"\n---\nToday's date: {date.today().isoformat()}")
+        return "".join(parts)
 
     def parse_message(
         self,
         message: str,
         sender_name: str,
         thread_context: list[dict] | None = None,
+        sites_context: str = "",
     ) -> ParseResult:
         """Parse a user message and return structured data."""
         user_content = f"[Sender: {sender_name}]\n{message}"
@@ -57,7 +88,7 @@ class ClaudeService:
         response = self.client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=self._build_system_prompt(),
+            system=self._build_system_prompt(sites_context=sites_context),
             messages=messages,
         )
 

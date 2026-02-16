@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-__version__ = "1.8.6"
+__version__ = "1.8.7"
 
 # Legacy fallback bullets (used only when CHANGELOG.md is missing from the image)
 RELEASE_NOTES: list[str] = []

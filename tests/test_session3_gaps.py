@@ -1,7 +1,8 @@
 """Tests for Session 3 features that lacked test coverage.
 
 Covers: event deduplication, duplicate site_id prevention, permission enforcement,
-stock cross-reference detection, and Last Verified auto-injection.
+stock cross-reference detection, Last Verified auto-injection, and dynamic sites
+context injection.
 """
 
 import time
@@ -9,8 +10,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.handlers.common import _is_duplicate_event, _processed_events, _processed_lock
+from app.handlers.common import _is_duplicate_event, _processed_events, _processed_lock, _DEDUP_TTL
 from app.handlers.actions import _should_ask_stock
+from app.services.claude import build_sites_context
 
 
 class TestEventDeduplication:
@@ -35,12 +37,36 @@ class TestEventDeduplication:
     def test_stale_events_are_cleaned_up(self):
         # Insert an event with a timestamp in the past beyond TTL
         with _processed_lock:
-            _processed_events["evt_old"] = time.time() - 60  # 60s ago, TTL is 30s
+            _processed_events["evt_old"] = time.time() - (_DEDUP_TTL + 10)
         # Next call should clean up the stale entry
         _is_duplicate_event("evt_new")
         with _processed_lock:
             assert "evt_old" not in _processed_events
             assert "evt_new" in _processed_events
+
+    def test_ttl_covers_slack_cold_start_retries(self):
+        """TTL must be long enough to cover Slack retries during cold starts.
+
+        Bug 15: Slack retries at ~10s, ~60s, ~5min when server is unavailable.
+        A 30s TTL failed to catch the 60s retry. TTL must be >= 300s.
+        """
+        assert _DEDUP_TTL >= 300, f"TTL {_DEDUP_TTL}s is too short for Slack retries"
+
+    def test_event_still_deduped_at_60_seconds(self):
+        """Event retried 60 seconds later (Slack retry #2) should still be caught."""
+        _is_duplicate_event("evt_retry60")
+        # Simulate 60 seconds passing by backdating the stored timestamp
+        with _processed_lock:
+            _processed_events["evt_retry60"] = time.time() - 60
+        # Should still be a duplicate (60 < TTL)
+        assert _is_duplicate_event("evt_retry60") is True
+
+    def test_event_still_deduped_at_290_seconds(self):
+        """Event retried ~5 min later should still be caught."""
+        _is_duplicate_event("evt_retry290")
+        with _processed_lock:
+            _processed_events["evt_retry290"] = time.time() - 290
+        assert _is_duplicate_event("evt_retry290") is True
 
 
 class TestStockCrossReference:
@@ -308,3 +334,83 @@ class TestLastVerifiedAutoInjection:
                 data["last_verified"] = today
 
         assert data["last_verified"] == "2025-01-01"
+
+
+class TestBuildSitesContext:
+    """Tests for build_sites_context() — dynamic sites list for Claude."""
+
+    def test_builds_compact_reference(self):
+        sites = [
+            {"Site ID": "MIG-TR-01", "Customer": "Migros"},
+            {"Site ID": "YTP-TR-01", "Customer": "Yeditepe Üniversitesi Koşuyolu Hastanesi"},
+        ]
+        result = build_sites_context(sites)
+        assert "MIG-TR-01 | Migros" in result
+        assert "YTP-TR-01 | Yeditepe Üniversitesi Koşuyolu Hastanesi" in result
+
+    def test_empty_sites_returns_empty(self):
+        assert build_sites_context([]) == ""
+
+    def test_excludes_sites_without_id(self):
+        sites = [
+            {"Site ID": "", "Customer": "Ghost"},
+            {"Site ID": "MIG-TR-01", "Customer": "Migros"},
+        ]
+        result = build_sites_context(sites)
+        assert "Ghost" not in result
+        assert "MIG-TR-01" in result
+
+    def test_contains_instruction_header(self):
+        sites = [{"Site ID": "MIG-TR-01", "Customer": "Migros"}]
+        result = build_sites_context(sites)
+        assert "existing" in result.lower() or "site" in result.lower()
+
+
+class TestSitesContextInjection:
+    """Tests that process_message reads sites and passes them to Claude."""
+
+    @patch("app.handlers.common.get_claude")
+    @patch("app.handlers.common.get_sheets")
+    @patch("app.handlers.common._resolve_user_name", return_value="Batu")
+    def test_sites_context_passed_to_claude(self, mock_resolve, mock_get_sheets, mock_get_claude):
+        """process_message should read sites and pass sites_context to parse_message."""
+        from app.handlers.common import process_message
+
+        mock_claude = MagicMock()
+        mock_parse_result = MagicMock()
+        mock_parse_result.operation = "update_site"
+        mock_parse_result.data = {"site_id": "YTP-TR-01", "supervisor_1": "Cigdem"}
+        mock_parse_result.error = None
+        mock_parse_result.missing_fields = []
+        mock_parse_result.warnings = []
+        mock_parse_result.language = "tr"
+        mock_parse_result.extra_operations = None
+        mock_get_claude.return_value = mock_claude
+        mock_claude.parse_message.return_value = mock_parse_result
+
+        mock_sheets = MagicMock()
+        mock_sheets.read_sites.return_value = [
+            {"Site ID": "YTP-TR-01", "Customer": "Yeditepe Üniversitesi Koşuyolu Hastanesi"},
+        ]
+        mock_get_sheets.return_value = mock_sheets
+
+        say = MagicMock()
+        client = MagicMock()
+
+        process_message(
+            text="yeditepe kosuyolu icin iletisim bilgilerini ekle",
+            user_id="U123",
+            channel="C001",
+            thread_ts="ts_sites_ctx_001",
+            say=say,
+            client=client,
+            event_ts="evt_sites_ctx_001",
+        )
+
+        # Claude should have been called with sites_context
+        call_kwargs = mock_claude.parse_message.call_args
+        assert "sites_context" in call_kwargs.kwargs or (
+            len(call_kwargs.args) > 3
+        ), "parse_message should receive sites_context"
+        sites_ctx = call_kwargs.kwargs.get("sites_context", "")
+        assert "YTP-TR-01" in sites_ctx

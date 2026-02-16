@@ -229,3 +229,42 @@ class TestTicketCloseClassification:
         assert result.operation == "log_support", (
             f"Expected log_support but got {result.operation}"
         )
+
+
+# ===========================================================================
+# Bug 15: Dynamic sites context — update_site vs create_site classification
+# ===========================================================================
+
+
+class TestSitesContextClassification:
+    """Bug 15: With sites list in context, Claude should correctly classify
+    update_site for existing customers instead of create_site."""
+
+    def test_existing_site_update_not_create(self, claude_service: ClaudeService):
+        """'yeditepe kosuyolu icin iletisim bilgilerini ekle' → update_site (not create_site).
+
+        Bug 15: Without sites context, Claude didn't know Yeditepe Koşuyolu
+        existed and classified as create_site.
+        """
+        from app.services.claude import build_sites_context
+
+        sites_ctx = build_sites_context([
+            {"Site ID": "MIG-TR-01", "Customer": "Migros"},
+            {"Site ID": "YTP-TR-01", "Customer": "Yeditepe Üniversitesi Koşuyolu Hastanesi"},
+            {"Site ID": "MCD-EG-01", "Customer": "McDonald's"},
+        ])
+        result = claude_service.parse_message(
+            message=(
+                "yeditepe kosuyolu icin su iletisim bilgilerini ekle: "
+                "Cigdem Yuksel Koc (EKK Hemsiresi), telefon: 0 535 411 78 24"
+            ),
+            sender_name="Batu",
+            sites_context=sites_ctx,
+        )
+        assert result.operation == "update_site", (
+            f"Expected update_site but got {result.operation}. "
+            f"Data: {result.data}"
+        )
+        assert result.data.get("site_id") == "YTP-TR-01", (
+            f"Expected site_id YTP-TR-01 but got {result.data.get('site_id')}"
+        )
