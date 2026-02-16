@@ -404,6 +404,95 @@ class TestUpdateSiteDoesNotRequireCreateFields:
         assert "country" in missing
 
 
+class TestSanitizeUnknownFields:
+    """Bug 15: Unknown fields invented by Haiku should be moved to notes."""
+
+    def test_unknown_field_stripped_and_moved_to_notes(self):
+        from app.handlers.common import sanitize_unknown_fields
+
+        data = {
+            "site_id": "YTP-TR-01",
+            "supervisor_1": "Cigdem Yuksel Koc",
+            "phone_1": "0 535 411 78 24",
+            "supervisor_1_role": "EKK Hemsiresi",
+        }
+        sanitize_unknown_fields("update_site", data)
+        assert "supervisor_1_role" not in data
+        assert "EKK Hemsiresi" in data.get("notes", "")
+
+    def test_known_fields_pass_through(self):
+        from app.handlers.common import sanitize_unknown_fields
+
+        data = {
+            "site_id": "YTP-TR-01",
+            "supervisor_1": "Test",
+            "phone_1": "555",
+            "notes": "existing note",
+        }
+        sanitize_unknown_fields("update_site", data)
+        assert data["supervisor_1"] == "Test"
+        assert data["phone_1"] == "555"
+
+    def test_multiple_unknown_fields_all_appended(self):
+        from app.handlers.common import sanitize_unknown_fields
+
+        data = {
+            "site_id": "YTP-TR-01",
+            "supervisor_1_role": "EKK Hemsiresi",
+            "supervisor_2_title": "YBU Sorumlu",
+        }
+        sanitize_unknown_fields("update_site", data)
+        notes = data.get("notes", "")
+        assert "EKK Hemsiresi" in notes
+        assert "YBU Sorumlu" in notes
+
+    def test_existing_notes_preserved(self):
+        from app.handlers.common import sanitize_unknown_fields
+
+        data = {
+            "site_id": "YTP-TR-01",
+            "supervisor_1_role": "EKK Hemsiresi",
+            "notes": "onceki not",
+        }
+        sanitize_unknown_fields("update_site", data)
+        assert "onceki not" in data["notes"]
+        assert "EKK Hemsiresi" in data["notes"]
+
+    def test_support_log_unknown_fields(self):
+        from app.handlers.common import sanitize_unknown_fields
+
+        data = {
+            "site_id": "MIG-TR-01",
+            "received_date": "2026-02-16",
+            "type": "Visit",
+            "status": "Resolved",
+            "custom_field": "some value",
+        }
+        sanitize_unknown_fields("log_support", data)
+        assert "custom_field" not in data
+        assert "some value" in data.get("notes", "")
+
+    def test_private_keys_ignored(self):
+        """Keys starting with _ are internal markers, not unknown fields."""
+        from app.handlers.common import sanitize_unknown_fields
+
+        data = {
+            "site_id": "YTP-TR-01",
+            "_row_index": 5,
+            "supervisor_1": "Test",
+        }
+        sanitize_unknown_fields("update_site", data)
+        assert data["_row_index"] == 5
+
+    def test_operation_without_key_map_is_noop(self):
+        from app.handlers.common import sanitize_unknown_fields
+
+        data = {"query_type": "site_summary", "site_id": "MIG-TR-01", "extra": "x"}
+        sanitize_unknown_fields("query", data)
+        # query has no key map, should not modify data
+        assert data["extra"] == "x"
+
+
 class TestSitesContextInjection:
     """Tests that process_message reads sites and passes them to Claude."""
 

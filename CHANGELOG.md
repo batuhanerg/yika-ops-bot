@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.8.9 — Unknown Field Sanitization (2026-02-16)
+
+<!-- RELEASE_NOTES v1.8.9
+🔧 Daha önce iletişim bilgisinde parantez içi açıklamalar (örn. "EKK Hemsiresi") kayboluyordu — artık bu bilgileri notlara ekliyorum.
+-->
+
+### Fixed
+- **Unknown field sanitization** — when Haiku invents non-existent column names (e.g. `supervisor_1_role`, `supervisor_2_title`), the values are now stripped from data and appended to the `notes` field instead of being silently dropped
+- **System prompt guard** — added explicit instruction to only use documented fields and put extra info in `notes`
+
+### Tests
+- 7 new tests: unknown field stripped → notes, known fields preserved, multiple unknowns, existing notes kept, support log unknowns, private keys ignored, unmapped ops noop
+- 641 total tests passing
+
 ## v1.8.8 — Update Site Must-Field Fix (2026-02-16)
 
 <!-- RELEASE_NOTES v1.8.8

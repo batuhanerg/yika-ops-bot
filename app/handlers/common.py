@@ -11,7 +11,12 @@ from typing import Any
 from app.handlers.threads import ThreadStore
 from app.models.operations import TEAM_MEMBERS
 from app.services.claude import ClaudeService, build_sites_context
-from app.services.sheets import SheetsService
+from app.services.sheets import (
+    SheetsService,
+    _SITES_KEY_MAP,
+    _SUPPORT_KEY_MAP,
+    _HARDWARE_KEY_MAP,
+)
 from app.services.site_resolver import SiteResolver
 from app.services.data_quality import find_missing_data, find_stale_data
 from app.utils.formatters import (
@@ -49,6 +54,53 @@ def _is_duplicate_event(event_ts: str) -> bool:
             return True
         _processed_events[event_ts] = now
         return False
+
+
+# Valid keys per operation for sanitize_unknown_fields
+_VALID_KEYS_BY_OP: dict[str, set[str]] = {
+    "create_site": set(_SITES_KEY_MAP),
+    "update_site": set(_SITES_KEY_MAP),
+    "log_support": set(_SUPPORT_KEY_MAP),
+    "update_support": set(_SUPPORT_KEY_MAP),
+    "update_hardware": set(_HARDWARE_KEY_MAP) | {"entries"},
+    "update_stock": {"location", "device_type", "hw_version", "fw_version", "qty", "condition", "reserved_for", "notes"},
+}
+
+
+def sanitize_unknown_fields(operation: str, data: dict[str, Any]) -> None:
+    """Strip unknown fields from data and append their values to notes.
+
+    Fields starting with _ are internal markers and are left untouched.
+    """
+    valid = _VALID_KEYS_BY_OP.get(operation)
+    if valid is None:
+        return  # No key map for this operation — nothing to sanitize
+
+    unknown_parts: list[str] = []
+    to_remove: list[str] = []
+    for k, v in data.items():
+        if k.startswith("_"):
+            continue
+        if k not in valid and v:
+            unknown_parts.append(f"{k}: {v}")
+            to_remove.append(k)
+
+    if not to_remove:
+        return
+
+    for k in to_remove:
+        del data[k]
+        logger.warning("Stripped unknown field %r from %s data", k, operation)
+
+    # Append to notes
+    extra = "; ".join(unknown_parts)
+    existing_notes = data.get("notes", "")
+    if existing_notes:
+        data["notes"] = f"{existing_notes}; {extra}"
+    else:
+        data["notes"] = extra
+
+
 _claude: ClaudeService | None = None
 _sheets: SheetsService | None = None
 
@@ -314,6 +366,9 @@ def process_message(
     )
     if is_chain_input:
         logger.info("Chain post-enforce: missing=%s", result.missing_fields)
+
+    # Strip unknown fields (e.g. "supervisor_1_role") and move to notes
+    sanitize_unknown_fields(result.operation, result.data)
 
     # Build conversation history for multi-turn context
     messages = thread_context or []
